@@ -1,0 +1,976 @@
+/* ============================================================
+   Dombla — Discord Palette Web Dashboard
+   Sleek Discord Dark Theme with Blurple Accents, Embed Cards,
+   Zero Emojis, and Dedicated Relay Space.
+   ============================================================ */
+
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap');
+
+/* ── CSS Custom Properties (Discord Design Tokens) ─────────── */
+
+:root {
+    /* Discord Base Palette */
+    --bg-app:             #1e1f22; /* Discord app deep background */
+    --bg-primary:         #2b2d31; /* Discord primary surface (cards, bars) */
+    --bg-secondary:       #313338; /* Discord secondary container / embeds */
+    --bg-tertiary:        #383a40; /* Discord elevated hover / active state */
+    --bg-input:           #1e1f22; /* Discord input fields */
+    --bg-floating:        #111214; /* Modals, tooltips, toasts */
+    --bg-badge:           #232428; /* Badges & chip base */
+
+    /* Discord Accents */
+    --accent-blurple:     #5865f2; /* Official Discord Blurple */
+    --accent-hover:       #4752c4;
+    --accent-active:      #3c45a5;
+    --accent-glow:        rgba(88, 101, 242, 0.25);
+
+    /* Discord Status Colors */
+    --color-online:       #23a55a; /* Discord Green */
+    --color-idle:         #f0b232; /* Discord Yellow */
+    --color-dnd:          #f23f43; /* Discord Red */
+    --color-offline:      #80848e; /* Discord Offline Grey */
+    --color-cyan:         #00a8fc; /* Discord Nitro Cyan */
+
+    /* Sensor Accents (Discord Harmonized) */
+    --color-temp:         #f23f43;
+    --color-temp-subtle:  rgba(242, 63, 67, 0.12);
+    --color-humidity:     #5865f2;
+    --color-humidity-subtle: rgba(88, 101, 242, 0.12);
+    --color-soil:         #23a55a;
+    --color-soil-subtle:  rgba(35, 165, 90, 0.12);
+    --color-soil1:        #23a55a;
+    --color-soil1-subtle: rgba(35, 165, 90, 0.12);
+    --color-soil2:        #00a8fc;
+    --color-soil2-subtle: rgba(0, 168, 252, 0.12);
+
+    /* Text Colors */
+    --text-primary:       #f2f3f5; /* Discord header white */
+    --text-secondary:     #dbdee1; /* Discord normal text */
+    --text-muted:         #949ba4; /* Discord channel / muted text */
+    --text-subtle:        #80848e; /* Discord subtle labels */
+
+    /* Borders & Shadows */
+    --border-subtle:      #1f2023;
+    --border-card:        rgba(255, 255, 255, 0.05);
+    --border-hover:       #3f4147;
+    --shadow-sm:          0 1px 2px rgba(0, 0, 0, 0.2);
+    --shadow-card:        0 2px 10px rgba(0, 0, 0, 0.25);
+    --shadow-popout:      0 8px 16px rgba(0, 0, 0, 0.32);
+
+    /* Discord Radii */
+    --radius-xs:          4px;
+    --radius-sm:          6px;
+    --radius-md:          8px;
+    --radius-lg:          12px;
+    --radius-pill:        9999px;
+
+    /* Transitions */
+    --transition-fast:    0.15s ease;
+    --transition-smooth:  0.22s ease-out;
+}
+
+/* ── Reset & Base ────────────────────────────────────────── */
+
+*, *::before, *::after {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+html {
+    font-size: 16px;
+    scroll-behavior: smooth;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+}
+
+body {
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+    background-color: var(--bg-app);
+    color: var(--text-secondary);
+    min-height: 100vh;
+    overflow-x: hidden;
+    line-height: 1.5;
+}
+
+/* ── Layout ──────────────────────────────────────────────── */
+
+.app {
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+}
+
+/* ── Navbar ──────────────────────────────────────────────── */
+
+.navbar {
+    background-color: var(--bg-primary);
+    border-bottom: 1px solid var(--border-subtle);
+    padding: 14px 28px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    position: sticky;
+    top: 0;
+    z-index: 100;
+    box-shadow: var(--shadow-sm);
+}
+
+.navbar-brand {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.navbar-logo {
+    width: 38px;
+    height: 38px;
+    background-color: var(--accent-blurple);
+    color: #ffffff;
+    border-radius: var(--radius-md);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: transform var(--transition-fast), border-radius var(--transition-fast);
+}
+
+.navbar-logo:hover {
+    border-radius: var(--radius-lg);
+    background-color: var(--accent-hover);
+}
+
+.navbar-title {
+    font-size: 1.25rem;
+    font-weight: 700;
+    color: var(--text-primary);
+    letter-spacing: -0.01em;
+    line-height: 1.2;
+}
+
+.navbar-subtitle {
+    font-size: 0.72rem;
+    color: var(--text-muted);
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+}
+
+.navbar-actions {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.navbar-status {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 0.8rem;
+    font-weight: 500;
+    color: var(--text-secondary);
+    padding: 6px 12px;
+    background-color: var(--bg-badge);
+    border-radius: var(--radius-pill);
+    border: 1px solid var(--border-subtle);
+}
+
+.status-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background-color: var(--color-offline);
+    transition: background-color var(--transition-smooth);
+}
+
+.status-dot.online {
+    background-color: var(--color-online);
+    box-shadow: 0 0 8px rgba(35, 165, 90, 0.6);
+}
+
+/* ── Main Content ────────────────────────────────────────── */
+
+.main-content {
+    padding: 24px 28px 48px;
+    max-width: 1360px;
+    margin: 0 auto;
+    width: 100%;
+    flex: 1;
+}
+
+/* ── Section Headers ─────────────────────────────────────── */
+
+.section-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 16px;
+    margin-top: 12px;
+}
+
+.section-title {
+    font-size: 0.82rem;
+    font-weight: 700;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.section-title-icon {
+    color: var(--text-muted);
+    stroke-width: 2.2;
+}
+
+.section-subtitle {
+    font-size: 0.75rem;
+    color: var(--text-subtle);
+    font-weight: 500;
+}
+
+/* ── Device Manager Bar ──────────────────────────────────── */
+
+.device-bar {
+    background-color: var(--bg-primary);
+    border: 1px solid var(--border-card);
+    border-radius: var(--radius-md);
+    padding: 14px 18px;
+    margin-bottom: 24px;
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    flex-wrap: wrap;
+    box-shadow: var(--shadow-sm);
+}
+
+.device-input-group {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex: 1;
+    min-width: 280px;
+}
+
+.device-input {
+    flex: 1;
+    padding: 10px 14px;
+    background-color: var(--bg-input);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-sm);
+    color: var(--text-primary);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.85rem;
+    outline: none;
+    transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+}
+
+.device-input:focus {
+    border-color: var(--accent-blurple);
+    box-shadow: 0 0 0 2px var(--accent-glow);
+}
+
+.device-input::placeholder {
+    color: var(--text-subtle);
+    font-family: 'Inter', sans-serif;
+}
+
+/* ── Discord Buttons ─────────────────────────────────────── */
+
+.btn {
+    padding: 9px 16px;
+    border: none;
+    border-radius: var(--radius-xs);
+    font-family: 'Inter', sans-serif;
+    font-size: 0.84rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background-color var(--transition-fast), transform var(--transition-fast), box-shadow var(--transition-fast);
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    white-space: nowrap;
+    text-decoration: none;
+}
+
+.btn-primary {
+    background-color: var(--accent-blurple);
+    color: #ffffff;
+}
+
+.btn-primary:hover {
+    background-color: var(--accent-hover);
+}
+
+.btn-primary:active {
+    background-color: var(--accent-active);
+    transform: translateY(1px);
+}
+
+.btn-secondary {
+    background-color: #4e5058;
+    color: var(--text-primary);
+}
+
+.btn-secondary:hover {
+    background-color: #6d6f78;
+}
+
+.btn-secondary:active {
+    background-color: #43444b;
+    transform: translateY(1px);
+}
+
+.btn-danger {
+    background-color: var(--color-dnd);
+    color: #ffffff;
+}
+
+.btn-danger:hover {
+    background-color: #da373c;
+}
+
+.btn-sm {
+    padding: 6px 12px;
+    font-size: 0.78rem;
+    border-radius: var(--radius-xs);
+}
+
+/* Device chips (Discord voice/role badge style) */
+.device-chips {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.device-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 12px;
+    background-color: var(--bg-badge);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-pill);
+    font-size: 0.8rem;
+    font-weight: 500;
+    color: var(--text-secondary);
+    cursor: pointer;
+    transition: all var(--transition-fast);
+}
+
+.device-chip:hover {
+    background-color: var(--bg-secondary);
+    color: var(--text-primary);
+    border-color: var(--border-hover);
+}
+
+.device-chip.active {
+    background-color: rgba(88, 101, 242, 0.15);
+    border-color: var(--accent-blurple);
+    color: #ffffff;
+}
+
+.device-chip .remove-btn {
+    width: 16px;
+    height: 16px;
+    border: none;
+    background: transparent;
+    color: var(--text-muted);
+    border-radius: 50%;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: color var(--transition-fast), background-color var(--transition-fast);
+}
+
+.device-chip .remove-btn:hover {
+    color: var(--color-dnd);
+    background-color: rgba(242, 63, 67, 0.2);
+}
+
+/* ── Sensor Cards Grid (Discord Embed Theme) ──────────────── */
+
+.sensor-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 16px;
+    margin-bottom: 28px;
+}
+
+.sensor-card {
+    background-color: var(--bg-primary);
+    border: 1px solid var(--border-card);
+    border-radius: var(--radius-md);
+    padding: 20px;
+    position: relative;
+    overflow: hidden;
+    transition: transform var(--transition-fast), background-color var(--transition-fast), border-color var(--transition-fast), box-shadow var(--transition-fast);
+    box-shadow: var(--shadow-card);
+}
+
+.sensor-card:hover {
+    background-color: var(--bg-secondary);
+    border-color: var(--border-hover);
+    transform: translateY(-2px);
+    box-shadow: var(--shadow-popout);
+}
+
+/* Discord embed-style left accent stripe */
+.sensor-card::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    bottom: 0;
+    width: 4px;
+    border-radius: var(--radius-md) 0 0 var(--radius-md);
+}
+
+.sensor-card.temp::before     { background-color: var(--color-temp); }
+.sensor-card.humidity::before { background-color: var(--color-humidity); }
+.sensor-card.soil::before     { background-color: var(--color-soil); }
+.sensor-card.soil1::before    { background-color: var(--color-soil1); }
+.sensor-card.soil2::before    { background-color: var(--color-soil2); }
+
+.sensor-card-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 12px;
+}
+
+.sensor-icon {
+    width: 36px;
+    height: 36px;
+    border-radius: var(--radius-sm);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.sensor-card.temp .sensor-icon     { background-color: var(--color-temp-subtle); color: var(--color-temp); }
+.sensor-card.humidity .sensor-icon { background-color: var(--color-humidity-subtle); color: var(--color-humidity); }
+.sensor-card.soil .sensor-icon     { background-color: var(--color-soil-subtle); color: var(--color-soil); }
+.sensor-card.soil1 .sensor-icon    { background-color: var(--color-soil1-subtle); color: var(--color-soil1); }
+.sensor-card.soil2 .sensor-icon    { background-color: var(--color-soil2-subtle); color: var(--color-soil2); }
+
+.sensor-label {
+    font-size: 0.76rem;
+    font-weight: 700;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+
+.sensor-value {
+    font-size: 2.25rem;
+    font-weight: 800;
+    line-height: 1.1;
+    margin-bottom: 6px;
+    color: var(--text-primary);
+    font-family: 'Inter', sans-serif;
+    letter-spacing: -0.02em;
+}
+
+.sensor-unit {
+    font-size: 1.05rem;
+    font-weight: 500;
+    color: var(--text-muted);
+    margin-left: 2px;
+}
+
+.sensor-status {
+    font-size: 0.72rem;
+    font-weight: 600;
+    padding: 3px 9px;
+    border-radius: var(--radius-xs);
+    display: inline-block;
+    margin-top: 6px;
+    letter-spacing: 0.02em;
+}
+
+.sensor-status.ok {
+    color: var(--color-online);
+    background-color: rgba(35, 165, 90, 0.15);
+}
+
+.sensor-status.warning {
+    color: var(--color-idle);
+    background-color: rgba(240, 178, 50, 0.15);
+}
+
+.sensor-status.danger {
+    color: var(--color-dnd);
+    background-color: rgba(242, 63, 67, 0.15);
+}
+
+/* ── Moisture Gauge ──────────────────────────────────────── */
+
+.moisture-gauge {
+    margin-top: 12px;
+    height: 6px;
+    background-color: var(--bg-input);
+    border-radius: 3px;
+    overflow: hidden;
+    position: relative;
+}
+
+.moisture-gauge-fill {
+    height: 100%;
+    border-radius: 3px;
+    transition: width 0.7s ease-out;
+}
+
+.sensor-card.soil .moisture-gauge-fill {
+    background-color: var(--color-soil);
+}
+
+.sensor-card.soil1 .moisture-gauge-fill {
+    background-color: var(--color-soil1);
+}
+
+.sensor-card.soil2 .moisture-gauge-fill {
+    background-color: var(--color-soil2);
+}
+
+/* ── Relay Controls Section (Reserved Expansion Space) ──── */
+
+.relay-wrapper {
+    margin-bottom: 32px;
+    margin-top: 8px;
+}
+
+.relay-container {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 16px;
+}
+
+.relay-card {
+    background-color: var(--bg-primary);
+    border: 1px solid var(--border-card);
+    border-radius: var(--radius-md);
+    padding: 22px;
+    box-shadow: var(--shadow-card);
+    transition: border-color var(--transition-fast), background-color var(--transition-fast);
+}
+
+.relay-card:hover {
+    background-color: var(--bg-secondary);
+    border-color: var(--border-hover);
+}
+
+.relay-card-inner {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+}
+
+.relay-badge-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 4px;
+}
+
+.relay-title {
+    font-size: 1rem;
+    font-weight: 700;
+    color: var(--text-primary);
+}
+
+.relay-state-pill {
+    font-size: 0.72rem;
+    font-weight: 700;
+    padding: 3px 10px;
+    border-radius: var(--radius-pill);
+    letter-spacing: 0.04em;
+    background-color: rgba(128, 132, 142, 0.2);
+    color: var(--text-muted);
+    transition: all var(--transition-fast);
+}
+
+.relay-state-pill.active {
+    background-color: rgba(35, 165, 90, 0.2);
+    color: var(--color-online);
+    box-shadow: 0 0 10px rgba(35, 165, 90, 0.3);
+}
+
+.relay-desc {
+    font-size: 0.84rem;
+    color: var(--text-muted);
+}
+
+.relay-actions {
+    margin-top: 4px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.btn-discord-toggle {
+    background-color: var(--accent-blurple);
+    color: #ffffff;
+    padding: 10px 20px;
+    border-radius: var(--radius-xs);
+    font-weight: 600;
+    font-size: 0.85rem;
+    border: none;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    transition: background-color var(--transition-fast), transform var(--transition-fast);
+}
+
+.btn-discord-toggle:hover {
+    background-color: var(--accent-hover);
+}
+
+.btn-discord-toggle:active {
+    transform: translateY(1px);
+    background-color: var(--accent-active);
+}
+
+.btn-discord-toggle.active {
+    background-color: var(--color-online);
+}
+
+.btn-discord-toggle.active:hover {
+    background-color: #1f9450;
+}
+
+/* Spare Relay Slot (Empty space for custom user buttons) */
+.relay-card-slot {
+    border: 1px dashed var(--border-hover);
+    background-color: rgba(30, 31, 34, 0.4);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 120px;
+}
+
+.relay-card-slot:hover {
+    border-color: var(--accent-blurple);
+    background-color: rgba(88, 101, 242, 0.04);
+}
+
+.relay-slot-content {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 8px;
+}
+
+.relay-slot-icon {
+    width: 44px;
+    height: 44px;
+    border-radius: var(--radius-md);
+    background-color: var(--bg-badge);
+    color: var(--text-muted);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.relay-slot-meta {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.relay-slot-title {
+    font-size: 0.92rem;
+    font-weight: 600;
+    color: var(--text-secondary);
+}
+
+.relay-slot-subtitle {
+    font-size: 0.78rem;
+    color: var(--text-subtle);
+}
+
+/* ── Charts Grid ─────────────────────────────────────────── */
+
+.charts-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+    margin-bottom: 28px;
+}
+
+.chart-card {
+    background-color: var(--bg-primary);
+    border: 1px solid var(--border-card);
+    border-radius: var(--radius-md);
+    padding: 20px;
+    box-shadow: var(--shadow-card);
+    transition: border-color var(--transition-fast);
+}
+
+.chart-card:hover {
+    border-color: var(--border-hover);
+}
+
+.chart-card-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 14px;
+}
+
+.chart-title-group {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    color: var(--text-primary);
+}
+
+.chart-title {
+    font-size: 0.88rem;
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+.chart-container {
+    position: relative;
+    height: 220px;
+}
+
+/* ── Device Info Panel ───────────────────────────────────── */
+
+.info-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 16px;
+    margin-bottom: 28px;
+}
+
+.info-card {
+    background-color: var(--bg-primary);
+    border: 1px solid var(--border-card);
+    border-radius: var(--radius-md);
+    padding: 20px;
+    box-shadow: var(--shadow-card);
+}
+
+.info-card-title {
+    font-size: 0.78rem;
+    font-weight: 700;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    margin-bottom: 14px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.info-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 8px 0;
+    border-bottom: 1px solid var(--border-subtle);
+}
+
+.info-row:last-child {
+    border-bottom: none;
+}
+
+.info-label {
+    font-size: 0.82rem;
+    color: var(--text-muted);
+}
+
+.info-value {
+    font-size: 0.84rem;
+    font-family: 'JetBrains Mono', monospace;
+    color: var(--text-primary);
+    font-weight: 500;
+}
+
+/* ── Alerts Panel ────────────────────────────────────────── */
+
+.alerts-panel {
+    margin-bottom: 20px;
+}
+
+.alert-item {
+    background-color: var(--bg-primary);
+    border: 1px solid var(--border-card);
+    border-left: 4px solid var(--color-idle);
+    border-radius: var(--radius-md);
+    padding: 12px 16px;
+    margin-bottom: 8px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    font-size: 0.85rem;
+    box-shadow: var(--shadow-sm);
+    animation: slideIn 0.25s ease-out;
+}
+
+.alert-item.danger {
+    border-left-color: var(--color-dnd);
+}
+
+.alert-icon {
+    display: flex;
+    align-items: center;
+    color: var(--color-idle);
+}
+
+.alert-item.danger .alert-icon {
+    color: var(--color-dnd);
+}
+
+.alert-text {
+    flex: 1;
+    color: var(--text-secondary);
+    font-weight: 500;
+}
+
+.alert-time {
+    font-size: 0.72rem;
+    color: var(--text-muted);
+    font-family: 'JetBrains Mono', monospace;
+}
+
+@keyframes slideIn {
+    from { opacity: 0; transform: translateY(-6px); }
+    to   { opacity: 1; transform: translateY(0); }
+}
+
+/* ── Empty State ─────────────────────────────────────────── */
+
+.empty-state {
+    text-align: center;
+    padding: 64px 20px;
+    color: var(--text-muted);
+    background-color: var(--bg-primary);
+    border: 1px solid var(--border-card);
+    border-radius: var(--radius-md);
+    margin-bottom: 28px;
+}
+
+.empty-state-icon {
+    color: var(--text-muted);
+    margin-bottom: 14px;
+    display: flex;
+    justify-content: center;
+}
+
+.empty-state-text {
+    font-size: 1.05rem;
+    font-weight: 600;
+    margin-bottom: 6px;
+    color: var(--text-primary);
+}
+
+.empty-state-sub {
+    font-size: 0.84rem;
+    color: var(--text-muted);
+}
+
+/* ── Toast Notifications ─────────────────────────────────── */
+
+.toast-container {
+    position: fixed;
+    bottom: 24px;
+    right: 24px;
+    z-index: 1000;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.toast {
+    background-color: var(--bg-floating);
+    border: 1px solid var(--border-hover);
+    border-radius: var(--radius-sm);
+    padding: 12px 18px;
+    font-size: 0.85rem;
+    font-weight: 500;
+    color: var(--text-primary);
+    box-shadow: var(--shadow-popout);
+    animation: toastIn 0.25s ease-out;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-width: 260px;
+}
+
+.toast.success { border-left: 3px solid var(--color-online); }
+.toast.error   { border-left: 3px solid var(--color-dnd); }
+.toast.warning { border-left: 3px solid var(--color-idle); }
+
+.toast-icon {
+    display: flex;
+    align-items: center;
+}
+
+.toast.success .toast-icon { color: var(--color-online); }
+.toast.error .toast-icon   { color: var(--color-dnd); }
+.toast.warning .toast-icon { color: var(--color-idle); }
+
+.toast.leaving {
+    animation: toastOut 0.25s forwards ease-in;
+}
+
+@keyframes toastIn {
+    from { opacity: 0; transform: translateX(40px); }
+    to   { opacity: 1; transform: translateX(0); }
+}
+
+@keyframes toastOut {
+    from { opacity: 1; transform: translateX(0); }
+    to   { opacity: 0; transform: translateX(40px); }
+}
+
+/* ── Responsive Design ───────────────────────────────────── */
+
+@media (max-width: 1100px) {
+    .sensor-grid {
+        grid-template-columns: repeat(2, 1fr);
+    }
+    .relay-container {
+        grid-template-columns: 1fr;
+    }
+    .info-grid {
+        grid-template-columns: 1fr 1fr;
+    }
+}
+
+@media (max-width: 768px) {
+    .navbar {
+        padding: 12px 16px;
+    }
+    .main-content {
+        padding: 16px;
+    }
+    .sensor-grid {
+        grid-template-columns: 1fr;
+    }
+    .charts-grid {
+        grid-template-columns: 1fr;
+    }
+    .info-grid {
+        grid-template-columns: 1fr;
+    }
+    .device-bar {
+        padding: 12px;
+    }
+    .device-input-group {
+        min-width: 100%;
+    }
+}
+
+/* ── Utilities ───────────────────────────────────────────── */
+
+.hidden { display: none !important; }
+
+.mono {
+    font-family: 'JetBrains Mono', monospace;
+}

@@ -1,0 +1,424 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://cdn.jsdelivr.net 'unsafe-inline'; style-src 'self' https://fonts.googleapis.com 'unsafe-inline'; font-src https://fonts.gstatic.com; connect-src *; img-src 'self' data:;">
+    <meta name="description" content="Dombla — ESP32 Sensor Monitoring Dashboard. Real-time temperature, humidity, and soil moisture monitoring for your plants.">
+    <title>Dombla — Plant Monitor Dashboard</title>
+    <link rel="stylesheet" href="style.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+</head>
+<body>
+    <div class="app" id="app">
+
+        <!-- ── Desktop Title Bar ───────────────────────────── -->
+        <div class="desktop-titlebar" id="desktop-titlebar">
+            <div class="titlebar-drag-region">
+                <div class="titlebar-brand">
+                    <svg class="titlebar-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M12 2a10 10 0 0 1 10 10c0 5.523-4.477 10-10 10S2 17.523 2 12A10 10 0 0 1 12 2z"/>
+                        <path d="M12 7v10"/>
+                        <path d="M7 12h10"/>
+                    </svg>
+                    <span class="titlebar-title">Dombla</span>
+                    <span class="titlebar-separator">—</span>
+                    <span class="titlebar-subtitle">Plant Monitor</span>
+                </div>
+            </div>
+            <div class="titlebar-controls">
+                <button class="titlebar-btn" id="btn-minimize" title="Minimize">
+                    <svg width="12" height="12" viewBox="0 0 12 12">
+                        <rect x="1" y="5.5" width="10" height="1" fill="currentColor"/>
+                    </svg>
+                </button>
+                <button class="titlebar-btn" id="btn-maximize" title="Maximize">
+                    <svg width="12" height="12" viewBox="0 0 12 12">
+                        <rect x="1.5" y="1.5" width="9" height="9" rx="1" fill="none" stroke="currentColor" stroke-width="1"/>
+                    </svg>
+                </button>
+                <button class="titlebar-btn titlebar-btn-close" id="btn-close" title="Close">
+                    <svg width="12" height="12" viewBox="0 0 12 12">
+                        <line x1="2" y1="2" x2="10" y2="10" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/>
+                        <line x1="10" y1="2" x2="2" y2="10" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/>
+                    </svg>
+                </button>
+            </div>
+        </div>
+
+        <!-- ── Navbar ────────────────────────────────────── -->
+        <nav class="navbar" id="navbar">
+            <div class="navbar-brand">
+                <div class="navbar-logo">
+                    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M12 2a10 10 0 0 1 10 10c0 5.523-4.477 10-10 10S2 17.523 2 12A10 10 0 0 1 12 2z"/>
+                        <path d="M12 7v10"/>
+                        <path d="M7 12h10"/>
+                    </svg>
+                </div>
+                <div>
+                    <div class="navbar-title">Dombla</div>
+                    <div class="navbar-subtitle">Plant Monitor</div>
+                </div>
+            </div>
+            <div class="navbar-actions">
+                <div class="navbar-status" id="connection-status">
+                    <span class="status-dot" id="status-dot"></span>
+                    <span id="status-text">No device</span>
+                </div>
+                <button class="btn btn-secondary btn-sm" id="btn-refresh" title="Refresh now">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/>
+                    </svg>
+                    <span>Refresh</span>
+                </button>
+            </div>
+        </nav>
+
+        <!-- ── Main Content ──────────────────────────────── -->
+        <main class="main-content">
+
+            <!-- Device Manager Bar -->
+            <div class="device-bar" id="device-bar">
+                <div class="device-input-group">
+                    <input
+                        type="text"
+                        class="device-input"
+                        id="device-ip-input"
+                        placeholder="Enter ESP32 IP address (e.g. 192.168.1.100)"
+                        autocomplete="off"
+                        spellcheck="false"
+                    >
+                    <button class="btn btn-primary" id="btn-add-device">
+                        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                            <line x1="12" y1="5" x2="12" y2="19"></line>
+                            <line x1="5" y1="12" x2="19" y2="12"></line>
+                        </svg>
+                        <span>Add Device</span>
+                    </button>
+                </div>
+                <div class="device-chips" id="device-chips">
+                    <!-- Device chips rendered by JS -->
+                </div>
+            </div>
+
+            <!-- Alerts Panel -->
+            <div class="alerts-panel" id="alerts-panel">
+                <!-- Alerts rendered by JS -->
+            </div>
+
+            <!-- Sensor Cards -->
+            <div class="section-header">
+                <h1 class="section-title">
+                    <svg class="section-title-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline>
+                    </svg>
+                    Live Sensors
+                </h1>
+                <span class="mono" style="font-size: 0.75rem; color: var(--text-muted);" id="last-update">
+                    —
+                </span>
+            </div>
+
+            <div class="sensor-grid" id="sensor-grid">
+                <!-- Temperature -->
+                <div class="sensor-card temp" id="card-temp">
+                    <div class="sensor-card-header">
+                        <div class="sensor-icon">
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <path d="M14 14.76V3.5a2.5 2.5 0 0 0-5 0v11.26a4.5 4.5 0 1 0 5 0z"/>
+                            </svg>
+                        </div>
+                        <span class="sensor-label">Temperature</span>
+                    </div>
+                    <div class="sensor-value" id="val-temp">
+                        --<span class="sensor-unit">°C</span>
+                    </div>
+                    <span class="sensor-status ok" id="status-temp">Waiting</span>
+                </div>
+
+                <!-- Humidity -->
+                <div class="sensor-card humidity" id="card-humidity">
+                    <div class="sensor-card-header">
+                        <div class="sensor-icon">
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <path d="M12 2.69l5.66 5.66a8 8 0 1 1-11.31 0z"/>
+                            </svg>
+                        </div>
+                        <span class="sensor-label">Humidity</span>
+                    </div>
+                    <div class="sensor-value" id="val-humidity">
+                        --<span class="sensor-unit">%</span>
+                    </div>
+                    <span class="sensor-status ok" id="status-humidity">Waiting</span>
+                </div>
+
+                <!-- Left Soil Monitor -->
+                <div class="sensor-card soil" id="card-soil1">
+                    <div class="sensor-card-header">
+                        <div class="sensor-icon">
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <path d="M2 22h20"/>
+                                <path d="M12 22V11"/>
+                                <path d="M12 11a5 5 0 0 1 5-5c0 5-5 5-5 5z"/>
+                                <path d="M12 15a4 4 0 0 0-4-4c0 4 4 4 4 4z"/>
+                            </svg>
+                        </div>
+                        <span class="sensor-label">Left Soil Monitor</span>
+                    </div>
+                    <div class="sensor-value" id="val-soil1">
+                        --<span class="sensor-unit">%</span>
+                    </div>
+                    <span class="sensor-status ok" id="status-soil1">Waiting</span>
+                    <div class="moisture-gauge">
+                        <div class="moisture-gauge-fill" id="gauge-soil1" style="width: 0%"></div>
+                    </div>
+                </div>
+
+                <!-- Right Soil Monitor -->
+                <div class="sensor-card soil" id="card-soil2">
+                    <div class="sensor-card-header">
+                        <div class="sensor-icon">
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <path d="M2 22h20"/>
+                                <path d="M12 22V11"/>
+                                <path d="M12 11a5 5 0 0 1 5-5c0 5-5 5-5 5z"/>
+                                <path d="M12 15a4 4 0 0 0-4-4c0 4 4 4 4 4z"/>
+                            </svg>
+                        </div>
+                        <span class="sensor-label">Right Soil Monitor</span>
+                    </div>
+                    <div class="sensor-value" id="val-soil2">
+                        --<span class="sensor-unit">%</span>
+                    </div>
+                    <span class="sensor-status ok" id="status-soil2">Waiting</span>
+                    <div class="moisture-gauge">
+                        <div class="moisture-gauge-fill" id="gauge-soil2" style="width: 0%"></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- ── Relay Controls & Actuators ────────────────── -->
+            <div class="relay-wrapper" id="relay-wrapper">
+                <div class="section-header">
+                    <h2 class="section-title">
+                        <svg class="section-title-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <rect x="1" y="4" width="22" height="16" rx="8" ry="8"/>
+                            <circle cx="8" cy="12" r="4"/>
+                        </svg>
+                        Relay Controls
+                    </h2>
+                    <span class="section-subtitle">Actuator & Switch Interface</span>
+                </div>
+
+                <div class="relay-container" id="relay-container">
+                    <!-- Grow Light Relay (GPIO 14) -->
+                    <div class="relay-card" id="relay-card-growlight">
+                        <div class="relay-card-inner">
+                            <div class="relay-info-box">
+                                <div class="relay-badge-row">
+                                    <span class="relay-title">Grow Light</span>
+                                    <span class="relay-state-pill" id="relay-state-growlight">OFF</span>
+                                </div>
+
+                            </div>
+                            <div class="relay-actions">
+                                <button class="btn btn-discord-toggle" id="btn-relay-growlight">
+                                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                        <circle cx="12" cy="12" r="5"></circle>
+                                        <line x1="12" y1="1" x2="12" y2="3"></line>
+                                        <line x1="12" y1="21" x2="12" y2="23"></line>
+                                        <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line>
+                                        <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line>
+                                        <line x1="1" y1="12" x2="3" y2="12"></line>
+                                        <line x1="21" y1="12" x2="23" y2="12"></line>
+                                        <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line>
+                                        <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
+                                    </svg>
+                                    <span>Toggle Light</span>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Water Pump Relay (GPIO 27) -->
+                    <div class="relay-card" id="relay-card-pump">
+                        <div class="relay-card-inner">
+                            <div class="relay-info-box">
+                                <div class="relay-badge-row">
+                                    <span class="relay-title">Water Pump</span>
+                                    <span class="relay-state-pill" id="relay-state-pump">OFF</span>
+                                </div>
+
+                            </div>
+                            <div class="relay-actions">
+                                <button class="btn btn-discord-toggle" id="btn-relay-pump">
+                                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                        <path d="M12 2.69l5.66 5.66a8 8 0 1 1-11.31 0z"></path>
+                                    </svg>
+                                    <span>Toggle Pump</span>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Charts -->
+            <div class="section-header">
+                <h2 class="section-title">
+                    <svg class="section-title-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <line x1="18" y1="20" x2="18" y2="10"></line>
+                        <line x1="12" y1="20" x2="12" y2="4"></line>
+                        <line x1="6" y1="20" x2="6" y2="14"></line>
+                    </svg>
+                    History
+                </h2>
+            </div>
+
+            <div class="charts-grid" id="charts-grid">
+                <div class="chart-card">
+                    <div class="chart-card-header">
+                        <div class="chart-title-group">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <path d="M14 14.76V3.5a2.5 2.5 0 0 0-5 0v11.26a4.5 4.5 0 1 0 5 0z"/>
+                            </svg>
+                            <span class="chart-title">Temperature & Humidity</span>
+                        </div>
+                    </div>
+                    <div class="chart-container">
+                        <canvas id="chart-climate"></canvas>
+                    </div>
+                </div>
+                <div class="chart-card">
+                    <div class="chart-card-header">
+                        <div class="chart-title-group">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <path d="M2 22h20"/>
+                                <path d="M12 22V11"/>
+                                <path d="M12 11a5 5 0 0 1 5-5c0 5-5 5-5 5z"/>
+                                <path d="M12 15a4 4 0 0 0-4-4c0 4 4 4 4 4z"/>
+                            </svg>
+                            <span class="chart-title">Soil Moisture</span>
+                        </div>
+                    </div>
+                    <div class="chart-container">
+                        <canvas id="chart-soil"></canvas>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Device Info -->
+            <div class="section-header">
+                <h2 class="section-title">
+                    <svg class="section-title-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <rect x="2" y="2" width="20" height="8" rx="2" ry="2"></rect>
+                        <rect x="2" y="14" width="20" height="8" rx="2" ry="2"></rect>
+                        <line x1="6" y1="6" x2="6.01" y2="6"></line>
+                        <line x1="6" y1="18" x2="6.01" y2="18"></line>
+                    </svg>
+                    Device Info
+                </h2>
+            </div>
+
+            <div class="info-grid" id="info-grid">
+                <div class="info-card">
+                    <div class="info-card-title">
+                        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M5 12.55a11 11 0 0 1 14.08 0"/>
+                            <path d="M1.42 9a16 16 0 0 1 21.16 0"/>
+                            <path d="M8.53 16.11a6 6 0 0 1 6.95 0"/>
+                            <line x1="12" y1="20" x2="12.01" y2="20"/>
+                        </svg>
+                        Network
+                    </div>
+                    <div class="info-row">
+                        <span class="info-label">IP Address</span>
+                        <span class="info-value" id="info-ip">—</span>
+                    </div>
+                    <div class="info-row">
+                        <span class="info-label">MAC</span>
+                        <span class="info-value" id="info-mac">—</span>
+                    </div>
+                    <div class="info-row">
+                        <span class="info-label">WiFi Signal</span>
+                        <span class="info-value" id="info-rssi">—</span>
+                    </div>
+                </div>
+                <div class="info-card">
+                    <div class="info-card-title">
+                        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <circle cx="12" cy="12" r="3"/>
+                            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+                        </svg>
+                        System
+                    </div>
+                    <div class="info-row">
+                        <span class="info-label">Device Name</span>
+                        <span class="info-value" id="info-name">—</span>
+                    </div>
+                    <div class="info-row">
+                        <span class="info-label">Uptime</span>
+                        <span class="info-value" id="info-uptime">—</span>
+                    </div>
+                    <div class="info-row">
+                        <span class="info-label">Free Heap</span>
+                        <span class="info-value" id="info-heap">—</span>
+                    </div>
+                </div>
+                <div class="info-card">
+                    <div class="info-card-title">
+                        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <line x1="4" y1="21" x2="4" y2="14"/>
+                            <line x1="4" y1="10" x2="4" y2="3"/>
+                            <line x1="12" y1="21" x2="12" y2="12"/>
+                            <line x1="12" y1="8" x2="12" y2="3"/>
+                            <line x1="20" y1="21" x2="20" y2="16"/>
+                            <line x1="20" y1="12" x2="20" y2="3"/>
+                            <line x1="1" y1="14" x2="7" y2="14"/>
+                            <line x1="9" y1="8" x2="15" y2="8"/>
+                            <line x1="17" y1="16" x2="23" y2="16"/>
+                        </svg>
+                        Thresholds
+                    </div>
+                    <div class="info-row">
+                        <span class="info-label">Temp Range</span>
+                        <span class="info-value" id="info-temp-range">—</span>
+                    </div>
+                    <div class="info-row">
+                        <span class="info-label">Humidity Min</span>
+                        <span class="info-value" id="info-hum-min">—</span>
+                    </div>
+                    <div class="info-row">
+                        <span class="info-label">Soil Range</span>
+                        <span class="info-value" id="info-soil-range">—</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Empty State (shown when no device added) -->
+            <div class="empty-state hidden" id="empty-state">
+                <div class="empty-state-icon">
+                    <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                        <rect x="2" y="2" width="20" height="8" rx="2" ry="2"/>
+                        <rect x="2" y="14" width="20" height="8" rx="2" ry="2"/>
+                        <line x1="6" y1="6" x2="6.01" y2="6"/>
+                        <line x1="6" y1="18" x2="6.01" y2="18"/>
+                    </svg>
+                </div>
+                <div class="empty-state-text">No devices connected</div>
+                <div class="empty-state-sub">
+                    Enter your ESP32's IP address above to start monitoring
+                </div>
+            </div>
+
+        </main>
+    </div>
+
+    <!-- Toast container -->
+    <div class="toast-container" id="toast-container"></div>
+
+    <script src="app.js"></script>
+    <script src="desktop.js"></script>
+</body>
+</html>

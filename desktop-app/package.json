@@ -1,0 +1,45 @@
+{
+  "name": "dombla-desktop",
+  "version": "1.0.0",
+  "description": "Dombla — ESP32 Plant Monitor Desktop App",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "build": "electron-builder --win",
+    "dev": "electron ."
+  },
+  "keywords": [
+    "esp32",
+    "plant-monitor",
+    "iot",
+    "dombla"
+  ],
+  "author": "Dombla",
+  "license": "MIT",
+  "devDependencies": {
+    "electron": "^44.3.0",
+    "electron-builder": "^25.1.8"
+  },
+  "build": {
+    "appId": "com.dombla.desktop",
+    "productName": "Dombla",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "renderer/**/*",
+      "assets/**/*"
+    ],
+    "win": {
+      "target": "nsis",
+      "icon": "assets/icon.ico"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": true,
+      "allowToChangeInstallationDirectory": true
+    }
+  }
+}
