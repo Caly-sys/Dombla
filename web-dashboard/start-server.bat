@@ -1,10 +1,11 @@
 @echo off
+cd /d "%~dp0"
 title Dombla Web Dashboard Server
 echo ============================================================
 echo   Dombla Web Dashboard ^& MQTT Remote Bridge
 echo ============================================================
 echo.
-echo Starting Node.js server at http://localhost:8000...
+echo Starting Node.js server at http://localhost:8000
 echo.
 
 where node >nul 2>nul
@@ -17,7 +18,7 @@ if %errorlevel% neq 0 (
 )
 
 if not exist node_modules (
-    echo Installing dependencies (first run only)...
+    echo Installing dependencies...
     call npm install
     echo.
 )

@@ -1,4 +1,5 @@
 @echo off
+cd /d "%~dp0"
 title Dombla Desktop App
 echo ========================================
 echo   Dombla Desktop App
