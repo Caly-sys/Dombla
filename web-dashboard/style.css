@@ -187,6 +187,42 @@ body {
     box-shadow: 0 0 8px rgba(35, 165, 90, 0.6);
 }
 
+.status-dot.connecting {
+    background-color: var(--accent-yellow);
+    box-shadow: 0 0 8px rgba(240, 178, 50, 0.6);
+}
+
+.status-dot.mqtt-active {
+    background-color: var(--accent-blurple);
+    box-shadow: 0 0 8px rgba(88, 101, 242, 0.6);
+}
+
+.navbar-status.mqtt-pill {
+    background-color: rgba(88, 101, 242, 0.08);
+    border-color: rgba(88, 101, 242, 0.22);
+}
+
+.source-badge {
+    display: inline-flex;
+    align-items: center;
+    font-size: 0.68rem;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    padding: 2px 8px;
+    border-radius: var(--radius-pill);
+    background-color: rgba(88, 101, 242, 0.15);
+    color: var(--accent-blurple);
+    border: 1px solid rgba(88, 101, 242, 0.25);
+    margin-left: 8px;
+    text-transform: uppercase;
+}
+
+.source-badge.remote {
+    background-color: rgba(35, 165, 90, 0.15);
+    color: var(--color-online);
+    border-color: rgba(35, 165, 90, 0.3);
+}
+
 /* ── Main Content ────────────────────────────────────────── */
 
 .main-content {

@@ -1,17 +1,57 @@
 // ============================================================
 //  Dombla — ESP32 Sensor Monitor Firmware
 //  Reads DHT11 + 2x Soil Moisture, displays on LCD, serves JSON API
+//  Now with MQTT remote access via HiveMQ Cloud
 // ============================================================
 
 #include <Arduino.h>
 #include <WiFi.h>
+#include <WiFiClientSecure.h>
 #include <WebServer.h>
 #include <ESPmDNS.h>
 #include <DHT.h>
 #include <LiquidCrystal_I2C.h>
 #include <ArduinoJson.h>
 #include <Wire.h>
+#include <PubSubClient.h>
 #include "config.h"
+
+// ── HiveMQ Cloud Root CA Certificate ────────────────────────
+// ISRG Root X1 — Let's Encrypt root used by HiveMQ Cloud
+static const char *hivemq_root_ca PROGMEM = R"EOF(
+-----BEGIN CERTIFICATE-----
+MIIFazCCA1OgAwIBAgIRAIIQz7DSQONZRGPgu2OCiwAwDQYJKoZIhvcNAQELBQAw
+TzELMAkGA1UEBhMCVVMxKTAnBgNVBAoTIEludGVybmV0IFNlY3VyaXR5IFJlc2Vh
+cmNoIEdyb3VwMRUwEwYDVQQDEwxJU1JHIFJvb3QgWDEwHhcNMTUwNjA0MTEwNDM4
+WhcNMzUwNjA0MTEwNDM4WjBPMQswCQYDVQQGEwJVUzEpMCcGA1UEChMgSW50ZXJu
+ZXQgU2VjdXJpdHkgUmVzZWFyY2ggR3JvdXAxFTATBgNVBAMTDElTUkcgUm9vdCBY
+MTCCAiIwDQYJKoZIhvcNAQEBBQADggIPADCCAgoCggIBAK3oJHP0FDfzm54rVygc
+h77ct984kIxuPOZXoHj3dcKi/vVqbvYATyjb3miGbESTtrFj/RQSa78f0uoxmyF+
+0TM8ukj13Xnfs7j/EvEhmkvBioZxaUpmZmyPfjxwv60pIgbz5MDmgK7iS4+3mX6
+UA5/TR5d8mUgjU+g4rk8Kb4Mu0UlXjIB0ttov0DiNewNwIRt18jA8+o+u3dpjq+s
+WT8KOEUt+zwvo/7V3LvSye0rgTBIlDHCNAymg4VMk7BPZ7hm/ELNKjD+Jo2FR3q
+yHB5T0Y3HsLuJvW5iB4YlcNHlsdu87kGJ55tukmi8mxdAQ4Q7e2RCOFvu396j3x
++UCB5iPNgiV5+I3lg02dZ77DnKxHZu8A/lJBdiB3QW0KtZB6awBdpUKD9jf1b0SH
+zUvKBds0pjBqAlkd25HN7rOrFleaJ1/ctaJxQZBKT5ZPt0m9STJEadao0xAH0ahm
+bWnOlFuhjuefXKnEgV2he687chSOBhFhOKLg7pRO6bgfkwjGA/7t/xOHtU9XD1Ec
+Q1YJmCCeMlSHF5YR2MXqhWlghJEE7VOHGIaH78QFAKxq52VqL/nfdGGwgm3GECEY
+gxvlWxWFlNAflF/E0AOfrHSJwE9GQJMPMfGFB2AWw0L7CheIhDdxTBAO/Ik1DQGC
+P0R+TMiCfMLAABN8oXsUSFNXnGIPAgMBAAGjQjBAMA4GA1UdDwEB/wQEAwIBBjAP
+BgNVHRMBAf8EBTADAQH/MB0GA1UdDgQWBBR5tFnme7bl5AFzgAiIyBpY9umbbjAN
+BgkqhkiG9w0BAQsFAAOCAgEAVR9YqbyyqFDQDLHYGmkgJykIrGF1XIpu+ILlaS/V
+9lZLubhzEFnTIZd+50xx+7LSYK05qAvqFyFWhfFQDlnrzuBZ6brJFe+GnY+EgPb
+k6ZGQ3BebYhtF8GaV0nxvwuo77x/Py9auJ/GpsMiu/X1+mvoiBOv/2X/qkSsisRc
+OJ/6aMYowGSwPQ0dTMQcASK3LIYdFz6EWZPEuNd9OS8nQBaG0buMcqMK/MywmFYH
+NPIQR0d54rKOe1fUJv6fOg+i2Rk/MFVuKkhq5193EPCFhDLRVpt2m0EF14mBKmhb
+H4SvsRuNEB9skzT2lL0iMnPMCsrP2GEJTBmxuUnhS0M7DOG2y1Jq5se1xJGBFIcz
+FT3VJQHCEE2mJT7G0aNBMiSTPGCpDHazxmoHTrLiSFMAD6RAvGKTFRCMlcECWHGm
+b8gJC20TJfMKVaMGx0gbKovBikDFJBB1fB0iJKk/NmGlzJM4PGw49jN9ii22+kCv
+FMHCNT5aFB81V0pR8MqKL/MIv+VGpETB0MdKTv/MH7c2VFEnKuZWQgmb3KfuVGMy
+Bj1c6JPMZIZgh0KyXKIC3nH6OMj8LHcNe0VFg0Mnp5lejDvZPkJpkjVtv+2MRZFK
+MN10bCYv07IwE/0M0xT3IT3PLAoswm0t+Jln6yBVLsTj16VmxVxNqAFqDq8+dYBH
+kz0=
+-----END CERTIFICATE-----
+)EOF";
 
 // ── Globals ─────────────────────────────────────────────────
 
@@ -19,21 +59,36 @@ DHT dht(DHT_PIN, DHT_TYPE);
 LiquidCrystal_I2C lcd(LCD_ADDR, LCD_COLS, LCD_ROWS);
 WebServer server(80);
 
+// MQTT clients
+WiFiClientSecure espClient;
+PubSubClient mqttClient(espClient);
+
 // Current sensor values
 float temperature   = 0.0;
 float humidity      = 0.0;
-float soilMoisture  = 0.0;   // percentage 0-100
+float soilMoisture  = 0.0;   // percentage 0-100 (sensor 1)
 int   soilRaw       = 0;
+float soilMoisture2 = 0.0;   // percentage 0-100 (sensor 2)
+int   soilRaw2      = 0;
+
+// Relay states
+bool pumpState      = false;
+bool growlightState = false;
 
 // LCD page cycling
 int   lcdPage       = 0;
-const int LCD_PAGES  = 3;
+const int LCD_PAGES  = 4;  // Added MQTT status page
 
 // Timing
 unsigned long lastDHTRead  = 0;
 unsigned long lastSoilRead = 0;
 unsigned long lastLCDCycle = 0;
 unsigned long lastHistoryRecord = 0;
+unsigned long lastMqttPublish = 0;
+unsigned long lastMqttReconnect = 0;
+
+// MQTT connection state
+bool mqttConnected = false;
 
 // Uptime
 unsigned long bootTime = 0;
@@ -44,6 +99,7 @@ struct SensorRecord {
     float temp;
     float hum;
     float soil;
+    float soil2;
     unsigned long timestamp;  // millis since boot
 };
 
@@ -82,6 +138,39 @@ float mapSoilMoisture(int rawValue) {
     return constrain(pct, 0.0, 100.0);
 }
 
+// ── Relay Control ───────────────────────────────────────────
+
+void setPump(bool on);
+void setGrowlight(bool on);
+
+void setupRelays() {
+    pinMode(RELAY_PUMP_PIN, OUTPUT);
+    pinMode(RELAY_GROWLIGHT_PIN, OUTPUT);
+    // Safe default: both OFF at boot
+    setPump(false);
+    setGrowlight(false);
+}
+
+void setPump(bool on) {
+    pumpState = on;
+    if (RELAY_ACTIVE_LOW) {
+        digitalWrite(RELAY_PUMP_PIN, on ? LOW : HIGH);
+    } else {
+        digitalWrite(RELAY_PUMP_PIN, on ? HIGH : LOW);
+    }
+    Serial.printf("[Relay] Pump %s\n", on ? "ON" : "OFF");
+}
+
+void setGrowlight(bool on) {
+    growlightState = on;
+    if (RELAY_ACTIVE_LOW) {
+        digitalWrite(RELAY_GROWLIGHT_PIN, on ? LOW : HIGH);
+    } else {
+        digitalWrite(RELAY_GROWLIGHT_PIN, on ? HIGH : LOW);
+    }
+    Serial.printf("[Relay] Growlight %s\n", on ? "ON" : "OFF");
+}
+
 // ── Sensor Reading ──────────────────────────────────────────
 
 void readDHT() {
@@ -96,12 +185,16 @@ void readDHT() {
 void readSoilSensors() {
     soilRaw = analogRead(SOIL_PIN);
     soilMoisture = mapSoilMoisture(soilRaw);
+
+    soilRaw2 = analogRead(SOIL_PIN_2);
+    soilMoisture2 = mapSoilMoisture(soilRaw2);
 }
 
 void recordHistory() {
     history[historyIndex].temp      = temperature;
     history[historyIndex].hum       = humidity;
     history[historyIndex].soil      = soilMoisture;
+    history[historyIndex].soil2     = soilMoisture2;
     history[historyIndex].timestamp = millis();
 
     historyIndex = (historyIndex + 1) % HISTORY_SIZE;
@@ -129,10 +222,10 @@ void updateLCD() {
             lcd.print("%");
             break;
 
-        case 1:  // Soil Moisture
+        case 1:  // Soil Moisture (sensor 1)
             lcd.setCursor(0, 0);
             lcd.write(2);  // plant icon
-            lcd.print(" Soil Moisture");
+            lcd.print(" Soil 1");
 
             lcd.setCursor(0, 1);
             lcd.print("  ");
@@ -160,6 +253,19 @@ void updateLCD() {
                 lcd.print("Connecting...");
             }
             break;
+
+        case 3:  // MQTT Status
+            lcd.setCursor(0, 0);
+            lcd.print("MQTT ");
+            lcd.print(mqttConnected ? "Connected" : "Offline");
+
+            lcd.setCursor(0, 1);
+            lcd.print("Pump:");
+            lcd.print(pumpState ? "ON " : "OFF");
+            lcd.print(" S1:");
+            lcd.print((int)soilMoisture);
+            lcd.print("%");
+            break;
     }
 
     lcdPage = (lcdPage + 1) % LCD_PAGES;
@@ -174,6 +280,8 @@ String getAlerts() {
     if (humidity < HUMIDITY_LOW_THRESHOLD)   alerts += "HUMIDITY_LOW,";
     if (soilMoisture < SOIL_DRY_THRESHOLD)  alerts += "SOIL_DRY,";
     if (soilMoisture > SOIL_WET_THRESHOLD)  alerts += "SOIL_WET,";
+    if (soilMoisture2 < SOIL_DRY_THRESHOLD) alerts += "SOIL2_DRY,";
+    if (soilMoisture2 > SOIL_WET_THRESHOLD) alerts += "SOIL2_WET,";
     if (alerts.endsWith(",")) alerts.remove(alerts.length() - 1);
     return alerts;
 }
@@ -203,6 +311,7 @@ void handleStatus() {
     doc["ip"]         = WiFi.localIP().toString();
     doc["mac"]        = WiFi.macAddress();
     doc["free_heap"]  = ESP.getFreeHeap();
+    doc["mqtt"]       = mqttConnected;
 
     JsonObject sensors = doc["sensors"].to<JsonObject>();
 
@@ -214,10 +323,20 @@ void handleStatus() {
     s["moisture"] = round(soilMoisture * 10.0) / 10.0;
     s["raw"]      = soilRaw;
 
-    // Backward compatibility alias
+    // Soil sensor 1
     JsonObject s1 = sensors["soil1"].to<JsonObject>();
     s1["moisture"] = round(soilMoisture * 10.0) / 10.0;
     s1["raw"]      = soilRaw;
+
+    // Soil sensor 2
+    JsonObject s2 = sensors["soil2"].to<JsonObject>();
+    s2["moisture"] = round(soilMoisture2 * 10.0) / 10.0;
+    s2["raw"]      = soilRaw2;
+
+    // Relay states
+    JsonObject relays = doc["relays"].to<JsonObject>();
+    relays["pump"]      = pumpState;
+    relays["growlight"] = growlightState;
 
     JsonObject thresholds = doc["thresholds"].to<JsonObject>();
     thresholds["temp_high"]     = TEMP_HIGH_THRESHOLD;
@@ -257,6 +376,10 @@ void handleSensors() {
     doc["soil_raw"]     = soilRaw;
     doc["soil1"]        = round(soilMoisture * 10.0) / 10.0;
     doc["soil1_raw"]    = soilRaw;
+    doc["soil2"]        = round(soilMoisture2 * 10.0) / 10.0;
+    doc["soil2_raw"]    = soilRaw2;
+    doc["pump"]         = pumpState;
+    doc["growlight"]    = growlightState;
     doc["timestamp"]    = millis();
 
     String output;
@@ -283,11 +406,53 @@ void handleHistory() {
         rec["hum"]       = round(history[idx].hum * 10.0) / 10.0;
         rec["soil"]      = round(history[idx].soil * 10.0) / 10.0;
         rec["soil1"]     = round(history[idx].soil * 10.0) / 10.0;
+        rec["soil2"]     = round(history[idx].soil2 * 10.0) / 10.0;
         rec["timestamp"] = history[idx].timestamp;
     }
 
     doc["count"] = historyCount;
     doc["max"]   = HISTORY_SIZE;
+
+    String output;
+    serializeJson(doc, output);
+    server.send(200, "application/json", output);
+}
+
+// ── API: POST /api/relay ────────────────────────────────────
+// Local relay control endpoint (existing dashboard uses this)
+
+void handleRelay() {
+    sendCORS();
+
+    String relay = server.arg("relay");
+    String stateArg = server.arg("state");
+
+    if (relay.length() == 0) {
+        server.send(400, "application/json", "{\"error\":\"missing relay param\"}");
+        return;
+    }
+
+    bool newState = (stateArg == "1" || stateArg == "true" || stateArg == "ON");
+
+    JsonDocument doc;
+
+    if (relay == "pump") {
+        setPump(newState);
+        doc["relay"] = "pump";
+        doc["state"] = pumpState;
+        // Publish state change to MQTT
+        if (mqttClient.connected()) {
+            String topic = String("dombla/") + MQTT_DEVICE_ID + "/pump/state";
+            mqttClient.publish(topic.c_str(), pumpState ? "ON" : "OFF", true);
+        }
+    } else if (relay == "growlight") {
+        setGrowlight(newState);
+        doc["relay"] = "growlight";
+        doc["state"] = growlightState;
+    } else {
+        server.send(400, "application/json", "{\"error\":\"unknown relay\"}");
+        return;
+    }
 
     String output;
     serializeJson(doc, output);
@@ -314,11 +479,115 @@ void handleRoot() {
                   "<div class='grid'>"
                   "<div class='metric'><div class='label'>Temp</div><div class='val'>" + String(temperature, 1) + "°</div></div>"
                   "<div class='metric'><div class='label'>Humidity</div><div class='val'>" + String(humidity, 1) + "%</div></div>"
-                  "<div class='metric'><div class='label'>Soil Moisture</div><div class='val'>" + String(soilMoisture, 1) + "%</div></div>"
+                  "<div class='metric'><div class='label'>Soil 1</div><div class='val'>" + String(soilMoisture, 1) + "%</div></div>"
+                  "<div class='metric'><div class='label'>Soil 2</div><div class='val'>" + String(soilMoisture2, 1) + "%</div></div>"
                   "</div>"
-                  "<p style='margin-top:20px;font-size:.8em;'>API: /api/status · /api/sensors · /api/history</p>"
+                  "<p style='margin-top:20px;font-size:.8em;'>API: /api/status · /api/sensors · /api/history · /api/relay</p>"
+                  "<p style='font-size:.7em;color:" + String(mqttConnected ? "#0cce6b" : "#f23f43") + ";'>MQTT: " + String(mqttConnected ? "Connected" : "Offline") + "</p>"
                   "</div></body></html>";
     server.send(200, "text/html", html);
+}
+
+// ── MQTT ────────────────────────────────────────────────────
+
+void mqttCallback(char* topic, byte* payload, unsigned int length) {
+    String msg;
+    for (unsigned int i = 0; i < length; i++) {
+        msg += (char)payload[i];
+    }
+    msg.trim();
+    msg.toUpperCase();
+
+    String topicStr = String(topic);
+    Serial.printf("[MQTT] Received: %s = %s\n", topic, msg.c_str());
+
+    // Pump control command
+    String pumpSetTopic = String("dombla/") + MQTT_DEVICE_ID + "/pump/set";
+    if (topicStr == pumpSetTopic) {
+        if (msg == "ON") {
+            setPump(true);
+        } else if (msg == "OFF") {
+            setPump(false);
+        } else {
+            Serial.printf("[MQTT] Unknown pump command: %s\n", msg.c_str());
+            return;
+        }
+        // Publish actual pump state back
+        String stateTopic = String("dombla/") + MQTT_DEVICE_ID + "/pump/state";
+        mqttClient.publish(stateTopic.c_str(), pumpState ? "ON" : "OFF", true);
+    }
+}
+
+void setupMQTT() {
+    espClient.setCACert(hivemq_root_ca);
+    mqttClient.setServer(MQTT_BROKER, MQTT_PORT);
+    mqttClient.setCallback(mqttCallback);
+    mqttClient.setKeepAlive(MQTT_KEEPALIVE);
+    Serial.println("[MQTT] Client configured for " + String(MQTT_BROKER));
+}
+
+bool mqttReconnect() {
+    if (mqttClient.connected()) {
+        mqttConnected = true;
+        return true;
+    }
+
+    // Don't try if WiFi is down
+    if (WiFi.status() != WL_CONNECTED) {
+        mqttConnected = false;
+        return false;
+    }
+
+    Serial.println("[MQTT] Attempting connection...");
+
+    // Build LWT (Last Will and Testament) topic
+    String statusTopic = String("dombla/") + MQTT_DEVICE_ID + "/status";
+
+    // Connect with LWT message
+    bool connected = mqttClient.connect(
+        MQTT_DEVICE_ID,         // Client ID
+        MQTT_USER,              // Username
+        MQTT_PASSWORD,          // Password
+        statusTopic.c_str(),    // LWT topic
+        1,                      // LWT QoS
+        true,                   // LWT retain
+        "offline"               // LWT message
+    );
+
+    if (connected) {
+        mqttConnected = true;
+        Serial.println("[MQTT] Connected to broker!");
+
+        // Publish online status
+        mqttClient.publish(statusTopic.c_str(), "online", true);
+
+        // Publish initial pump state
+        String pumpStateTopic = String("dombla/") + MQTT_DEVICE_ID + "/pump/state";
+        mqttClient.publish(pumpStateTopic.c_str(), pumpState ? "ON" : "OFF", true);
+
+        // Subscribe to pump control commands
+        String pumpSetTopic = String("dombla/") + MQTT_DEVICE_ID + "/pump/set";
+        mqttClient.subscribe(pumpSetTopic.c_str(), 1);
+        Serial.println("[MQTT] Subscribed to: " + pumpSetTopic);
+    } else {
+        mqttConnected = false;
+        Serial.printf("[MQTT] Connection failed, rc=%d\n", mqttClient.state());
+    }
+
+    return connected;
+}
+
+void mqttPublishSensors() {
+    if (!mqttClient.connected()) return;
+
+    String prefix = String("dombla/") + MQTT_DEVICE_ID + "/sensors/";
+
+    mqttClient.publish((prefix + "temperature").c_str(), String(temperature, 1).c_str(), true);
+    mqttClient.publish((prefix + "humidity").c_str(),    String(humidity, 1).c_str(), true);
+    mqttClient.publish((prefix + "soil1").c_str(),       String(soilMoisture, 1).c_str(), true);
+    mqttClient.publish((prefix + "soil2").c_str(),       String(soilMoisture2, 1).c_str(), true);
+
+    Serial.println("[MQTT] Sensors published");
 }
 
 // ── WiFi Setup ──────────────────────────────────────────────
@@ -360,7 +629,7 @@ void setupWiFi() {
         lcd.setCursor(0, 0);
         lcd.print("WiFi FAILED!");
         lcd.setCursor(0, 1);
-        lcd.print("Check config.h");
+        lcd.print("Check secrets.h");
         delay(3000);
     }
 }
@@ -386,7 +655,7 @@ void setup() {
 
     lcd.clear();
     lcd.setCursor(2, 0);
-    lcd.print("Dombla v1.0");
+    lcd.print("Dombla v2.0");
     lcd.setCursor(3, 1);
     lcd.print("Starting...");
     delay(1500);
@@ -394,11 +663,18 @@ void setup() {
     // Initialize DHT11
     dht.begin();
 
-    // Initialize soil sensor pin
+    // Initialize soil sensor pins
     pinMode(SOIL_PIN, INPUT);
+    pinMode(SOIL_PIN_2, INPUT);
+
+    // Initialize relays (safe OFF state)
+    setupRelays();
 
     // Connect to WiFi
     setupWiFi();
+
+    // Setup MQTT
+    setupMQTT();
 
     // Setup mDNS
     if (MDNS.begin(MDNS_HOSTNAME)) {
@@ -412,11 +688,13 @@ void setup() {
     server.on("/api/status",   HTTP_GET,     handleStatus);
     server.on("/api/sensors",  HTTP_GET,     handleSensors);
     server.on("/api/history",  HTTP_GET,     handleHistory);
+    server.on("/api/relay",    HTTP_POST,    handleRelay);
 
     // CORS preflight
     server.on("/api/status",   HTTP_OPTIONS, handleOptions);
     server.on("/api/sensors",  HTTP_OPTIONS, handleOptions);
     server.on("/api/history",  HTTP_OPTIONS, handleOptions);
+    server.on("/api/relay",    HTTP_OPTIONS, handleOptions);
 
     server.begin();
     Serial.println("HTTP server started on port 80");
@@ -425,12 +703,20 @@ void setup() {
     readDHT();
     readSoilSensors();
     recordHistory();
+
+    // Initial MQTT connection attempt
+    mqttReconnect();
 }
 
 // ── Main Loop ───────────────────────────────────────────────
 
 void loop() {
     server.handleClient();
+
+    // MQTT client loop (non-blocking)
+    if (mqttClient.connected()) {
+        mqttClient.loop();
+    }
 
     unsigned long now = millis();
 
@@ -456,6 +742,21 @@ void loop() {
     if (now - lastHistoryRecord >= 60000) {
         lastHistoryRecord = now;
         recordHistory();
+    }
+
+    // Publish sensors via MQTT periodically
+    if (now - lastMqttPublish >= MQTT_PUBLISH_INTERVAL) {
+        lastMqttPublish = now;
+        mqttPublishSensors();
+    }
+
+    // MQTT auto-reconnect (non-blocking, with backoff)
+    if (!mqttClient.connected()) {
+        mqttConnected = false;
+        if (now - lastMqttReconnect >= MQTT_RECONNECT_INTERVAL) {
+            lastMqttReconnect = now;
+            mqttReconnect();
+        }
     }
 
     // WiFi auto-reconnect

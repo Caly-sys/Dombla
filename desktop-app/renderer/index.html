@@ -66,6 +66,10 @@
                     <span class="status-dot" id="status-dot"></span>
                     <span id="status-text">No device</span>
                 </div>
+                <div class="navbar-status mqtt-pill" id="mqtt-status" title="HiveMQ Cloud MQTT Bridge">
+                    <span class="status-dot" id="mqtt-status-dot"></span>
+                    <span id="mqtt-status-text">MQTT: Connecting...</span>
+                </div>
                 <button class="btn btn-secondary btn-sm" id="btn-refresh" title="Refresh now">
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                         <path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/>
@@ -114,6 +118,7 @@
                         <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline>
                     </svg>
                     Live Sensors
+                    <span class="source-badge" id="data-source-badge">Local HTTP</span>
                 </h1>
                 <span class="mono" style="font-size: 0.75rem; color: var(--text-muted);" id="last-update">
                     —

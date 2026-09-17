@@ -5,22 +5,31 @@
 //  Dombla — ESP32 Sensor Monitor Configuration
 // ============================================================
 
-// --- WiFi Credentials ---
-// ⚠️  Change these to your network credentials before flashing!
-#define WIFI_SSID "Infinix HOT 60 PRO"
-#define WIFI_PASSWORD "AMD RX 9070 XT 16GB"
+// --- Credentials (loaded from secrets.h — see that file) ---
+#include "secrets.h"
 
 // --- Device Identity ---
 #define DEVICE_NAME "Dombla-01"
 #define MDNS_HOSTNAME "dombla" // Reachable at dombla.local
+
+// --- MQTT Settings ---
+// Device ID used in MQTT topics: dombla/<MQTT_DEVICE_ID>/sensors/...
+#define MQTT_DEVICE_ID       "greenhouse1"
+#define MQTT_PUBLISH_INTERVAL 10000   // Publish sensor data every 10 seconds
+#define MQTT_RECONNECT_INTERVAL 5000  // Wait 5s between reconnect attempts
+#ifdef MQTT_KEEPALIVE
+#undef MQTT_KEEPALIVE
+#endif
+#define MQTT_KEEPALIVE       60       // MQTT keepalive in seconds
 
 // --- Pin Definitions ---
 // 🌡️ DHT11 Temperature & Humidity Sensor
 #define DHT_PIN 4
 #define DHT_TYPE DHT11
 
-// 🌱 Soil Moisture Sensor (Analog)
-#define SOIL_PIN 34
+// 🌱 Soil Moisture Sensors (Analog)
+#define SOIL_PIN   34   // Soil sensor 1 — GPIO 34 (ADC1_CH6)
+#define SOIL_PIN_2 35   // Soil sensor 2 — GPIO 35 (ADC1_CH7)
 
 // 🔌 Relay Outputs
 #define RELAY_GROWLIGHT_PIN 14  // GPIO 14 — Grow Light relay

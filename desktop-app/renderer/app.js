@@ -10,7 +10,7 @@
     // ── State ───────────────────────────────────────────────
     const state = {
         devices: [],            // [{ ip, name, online }]
-        activeDevice: null,     // Currently selected device IP
+        activeDevice: null,     // Currently selected device IP or 'mqtt'
         pollInterval: null,     // Polling timer ID
         pollRate: 5000,         // Poll every 5 seconds
         lastData: null,         // Last fetched data from /api/status
@@ -21,6 +21,14 @@
         relays: {
             growlight: false,
             pump: false
+        },
+        mqtt: {
+            ws: null,
+            configured: false,
+            connected: false,
+            deviceId: 'greenhouse1',
+            lastData: null,
+            reconnectTimer: null
         }
     };
 
@@ -30,6 +38,10 @@
     const dom = {
         statusDot:       $('status-dot'),
         statusText:      $('status-text'),
+        mqttStatus:      $('mqtt-status'),
+        mqttStatusDot:   $('mqtt-status-dot'),
+        mqttStatusText:  $('mqtt-status-text'),
+        dataSourceBadge: $('data-source-badge'),
         deviceInput:     $('device-ip-input'),
         btnAddDevice:    $('btn-add-device'),
         btnRefresh:      $('btn-refresh'),
@@ -160,8 +172,34 @@
     function selectDevice(ip) {
         state.activeDevice = ip;
         renderDeviceChips();
+        updateDataSourceBadge('local');
         startPolling();
         fetchData(); // Immediate fetch
+    }
+
+    function selectMqttDevice() {
+        state.activeDevice = 'mqtt';
+        stopPolling();
+        renderDeviceChips();
+        updateDataSourceBadge('remote');
+        if (state.mqtt.lastData) {
+            updateSensorCards(state.mqtt.lastData);
+            updateRelayStates(state.mqtt.lastData);
+            updateInfoPanel(state.mqtt.lastData);
+        }
+        updateConnectionStatus(state.mqtt.connected, `MQTT (${state.mqtt.deviceId})`);
+    }
+
+    function updateDataSourceBadge(mode) {
+        if (!dom.dataSourceBadge) return;
+        dom.dataSourceBadge.style.display = 'inline-flex';
+        if (mode === 'remote') {
+            dom.dataSourceBadge.textContent = 'MQTT Remote';
+            dom.dataSourceBadge.className = 'source-badge remote';
+        } else {
+            dom.dataSourceBadge.textContent = 'Local HTTP';
+            dom.dataSourceBadge.className = 'source-badge';
+        }
     }
 
     function renderDeviceChips() {
@@ -187,11 +225,24 @@
             dom.deviceChips.appendChild(chip);
         });
 
+        // Add MQTT remote device chip if configured
+        if (state.mqtt && state.mqtt.configured) {
+            const mqttChip = document.createElement('div');
+            const isMqttActive = (state.activeDevice === 'mqtt' || (!state.activeDevice && state.mqtt.connected));
+            mqttChip.className = `device-chip ${isMqttActive ? 'active' : ''}`;
+            mqttChip.innerHTML = `
+                <span class="status-dot ${state.mqtt.connected ? 'mqtt-active' : ''}" style="width:6px;height:6px;"></span>
+                <span>MQTT: ${state.mqtt.deviceId}</span>
+            `;
+            mqttChip.addEventListener('click', () => selectMqttDevice());
+            dom.deviceChips.appendChild(mqttChip);
+        }
+
         updateVisibility();
     }
 
     function updateVisibility() {
-        const hasDevices = state.devices.length > 0;
+        const hasDevices = state.devices.length > 0 || (state.mqtt && (state.mqtt.configured || state.mqtt.lastData));
         dom.emptyState.classList.toggle('hidden', hasDevices);
         dom.sensorGrid.classList.toggle('hidden', !hasDevices);
         if (dom.relayWrapper) dom.relayWrapper.classList.toggle('hidden', !hasDevices);
@@ -201,7 +252,7 @@
 
     // ── Data Fetching ───────────────────────────────────────
     async function fetchData() {
-        if (!state.activeDevice) return;
+        if (!state.activeDevice || state.activeDevice === 'mqtt') return;
 
         const device = state.devices.find(d => d.ip === state.activeDevice);
         if (!device) return;
@@ -228,6 +279,7 @@
             updateAlerts(data);
             updateRelayStates(data);
             updateConnectionStatus(true, device.name);
+            updateDataSourceBadge('local');
 
             // Fetch history for charts
             fetchHistory();
@@ -640,8 +692,19 @@
         const label = relayName === 'growlight' ? 'Grow Light' : 'Water Pump';
         showToast(`${label} turned ${isOn ? 'ON' : 'OFF'}`, isOn ? 'success' : 'warning');
 
-        // Send command to ESP32
-        if (state.activeDevice) {
+        // Check if we should route directly via MQTT WebSocket
+        const isMqttMode = (state.activeDevice === 'mqtt' || (!state.activeDevice && state.mqtt.connected));
+        if (isMqttMode && state.mqtt.ws && state.mqtt.ws.readyState === WebSocket.OPEN) {
+            state.mqtt.ws.send(JSON.stringify({
+                action: relayName,
+                deviceId: state.mqtt.deviceId,
+                state: isOn ? 'ON' : 'OFF'
+            }));
+            return;
+        }
+
+        // Send command to ESP32 via HTTP
+        if (state.activeDevice && state.activeDevice !== 'mqtt') {
             try {
                 const resp = await fetch(
                     `http://${state.activeDevice}/api/relay?relay=${relayName}&state=${isOn ? 1 : 0}`,
@@ -649,16 +712,24 @@
                 );
                 if (resp.ok) {
                     const result = await resp.json();
-                    // Sync with actual hardware state
                     state.relays[relayName] = result.state;
                     updateRelayUI(relayName, result.state);
                 }
             } catch (err) {
-                console.warn('Relay command failed:', err.message);
-                showToast(`Failed to toggle ${label}`, 'error');
-                // Revert on failure
-                state.relays[relayName] = !isOn;
-                updateRelayUI(relayName, !isOn);
+                console.warn('Relay HTTP command failed:', err.message);
+                // Fallback to MQTT if connected
+                if (state.mqtt.ws && state.mqtt.ws.readyState === WebSocket.OPEN) {
+                    state.mqtt.ws.send(JSON.stringify({
+                        action: relayName,
+                        deviceId: state.mqtt.deviceId,
+                        state: isOn ? 'ON' : 'OFF'
+                    }));
+                    showToast(`${label} command routed via MQTT fallback`, 'success');
+                } else {
+                    showToast(`Failed to toggle ${label}`, 'error');
+                    state.relays[relayName] = !isOn;
+                    updateRelayUI(relayName, !isOn);
+                }
             }
         }
     }
@@ -688,6 +759,220 @@
         }
     }
 
+    // ── MQTT WebSocket Client & Handling ────────────────────
+
+    function initMQTT() {
+        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        const host = window.location.host || 'localhost:8000';
+        const wsUrl = `${protocol}//${host}/ws`;
+
+        try {
+            const ws = new WebSocket(wsUrl);
+            state.mqtt.ws = ws;
+
+            ws.onopen = () => {
+                console.log('[MQTT Bridge] Connected to WebSocket backend');
+            };
+
+            ws.onmessage = (event) => {
+                try {
+                    const data = JSON.parse(event.data);
+                    if (data.type === 'init') {
+                        state.mqtt.configured = data.configured;
+                        state.mqtt.connected = data.mqttConnected;
+                        state.mqtt.deviceId = data.deviceId || 'greenhouse1';
+                        updateMQTTStatusUI();
+                        renderDeviceChips();
+
+                        // If backend has cached device data
+                        if (data.devices && data.devices[state.mqtt.deviceId]) {
+                            applyCachedMqttDevice(data.devices[state.mqtt.deviceId]);
+                        }
+                    } else if (data.type === 'mqtt_status') {
+                        state.mqtt.connected = data.connected;
+                        if (data.deviceId) state.mqtt.deviceId = data.deviceId;
+                        updateMQTTStatusUI();
+                        renderDeviceChips();
+                    } else if (data.type === 'mqtt_data') {
+                        handleMqttData(data);
+                    }
+                } catch (e) {
+                    console.warn('[MQTT Bridge] Message parse error:', e);
+                }
+            };
+
+            ws.onclose = () => {
+                state.mqtt.connected = false;
+                updateMQTTStatusUI();
+                renderDeviceChips();
+                // Reconnect after 3 seconds
+                if (!state.mqtt.reconnectTimer) {
+                    state.mqtt.reconnectTimer = setTimeout(() => {
+                        state.mqtt.reconnectTimer = null;
+                        initMQTT();
+                    }, 3000);
+                }
+            };
+
+            ws.onerror = () => {
+                console.warn('[MQTT Bridge] WebSocket connection error');
+            };
+        } catch (e) {
+            console.warn('[MQTT Bridge] Init exception:', e);
+        }
+    }
+
+    function updateMQTTStatusUI() {
+        if (!dom.mqttStatus || !dom.mqttStatusDot || !dom.mqttStatusText) return;
+        if (!state.mqtt.configured) {
+            dom.mqttStatusDot.className = 'status-dot';
+            dom.mqttStatusText.textContent = 'MQTT: Offline';
+            dom.mqttStatus.title = 'Configure HiveMQ Cloud credentials in web-dashboard/.env';
+        } else if (state.mqtt.connected) {
+            dom.mqttStatusDot.className = 'status-dot mqtt-active';
+            dom.mqttStatusText.textContent = `MQTT: Online`;
+            dom.mqttStatus.title = `HiveMQ Cloud Active (Device: ${state.mqtt.deviceId})`;
+        } else {
+            dom.mqttStatusDot.className = 'status-dot connecting';
+            dom.mqttStatusText.textContent = 'MQTT: Connecting';
+            dom.mqttStatus.title = 'Attempting connection to HiveMQ Cloud...';
+        }
+    }
+
+    function applyCachedMqttDevice(cachedDev) {
+        if (!cachedDev) return;
+        if (!state.mqtt.lastData) {
+            state.mqtt.lastData = createEmptySensorData(cachedDev.deviceId || state.mqtt.deviceId);
+        }
+        const d = state.mqtt.lastData;
+        if (cachedDev.sensors) {
+            if (cachedDev.sensors.temperature !== undefined) d.sensors.dht11.temperature = cachedDev.sensors.temperature;
+            if (cachedDev.sensors.humidity !== undefined) d.sensors.dht11.humidity = cachedDev.sensors.humidity;
+            if (cachedDev.sensors.soil1 !== undefined) d.sensors.soil1.moisture = cachedDev.sensors.soil1;
+            if (cachedDev.sensors.soil2 !== undefined) d.sensors.soil2.moisture = cachedDev.sensors.soil2;
+        }
+        if (cachedDev.pump !== undefined) {
+            d.relays.pump = cachedDev.pump;
+            state.relays.pump = cachedDev.pump;
+            updateRelayUI('pump', cachedDev.pump);
+        }
+        if (cachedDev.growlight !== undefined) {
+            d.relays.growlight = cachedDev.growlight;
+            state.relays.growlight = cachedDev.growlight;
+            updateRelayUI('growlight', cachedDev.growlight);
+        }
+
+        if (state.activeDevice === 'mqtt' || (!state.activeDevice && state.devices.length === 0)) {
+            updateSensorCards(d);
+            updateDataSourceBadge('remote');
+            updateVisibility();
+            updateConnectionStatus(true, `MQTT (${state.mqtt.deviceId})`);
+        }
+    }
+
+    function handleMqttData(msg) {
+        const topic = msg.topic;
+        const payload = msg.payload;
+
+        if (!state.mqtt.lastData) {
+            state.mqtt.lastData = createEmptySensorData(state.mqtt.deviceId);
+        }
+
+        const d = state.mqtt.lastData;
+        const parts = topic.split('/');
+        // dombla/<deviceId>/...
+        if (parts.length >= 3) {
+            const topicType = parts[2];
+            const subType = parts[3];
+
+            if (topicType === 'sensors' && subType) {
+                const val = parseFloat(payload);
+                if (subType === 'temperature') d.sensors.dht11.temperature = isNaN(val) ? payload : val;
+                if (subType === 'humidity') d.sensors.dht11.humidity = isNaN(val) ? payload : val;
+                if (subType === 'soil1') d.sensors.soil1.moisture = isNaN(val) ? payload : val;
+                if (subType === 'soil2') d.sensors.soil2.moisture = isNaN(val) ? payload : val;
+
+                // Push to live charts
+                addLiveChartPoint(d.sensors.dht11.temperature, d.sensors.dht11.humidity, d.sensors.soil1.moisture);
+            } else if (topicType === 'pump' && subType === 'state') {
+                const isOn = payload.toUpperCase() === 'ON';
+                d.relays.pump = isOn;
+                state.relays.pump = isOn;
+                updateRelayUI('pump', isOn);
+            } else if (topicType === 'growlight' && subType === 'state') {
+                const isOn = payload.toUpperCase() === 'ON';
+                d.relays.growlight = isOn;
+                state.relays.growlight = isOn;
+                updateRelayUI('growlight', isOn);
+            } else if (topicType === 'status') {
+                const isOnline = payload.toLowerCase() === 'online';
+                state.mqtt.connected = isOnline;
+                updateMQTTStatusUI();
+            }
+        }
+
+        // Apply to UI if currently viewing MQTT or no online local device
+        const activeLocalOnline = state.activeDevice && state.activeDevice !== 'mqtt' && state.devices.find(x => x.ip === state.activeDevice && x.online);
+        if (state.activeDevice === 'mqtt' || (!activeLocalOnline && (state.activeDevice === null || state.devices.length === 0))) {
+            updateSensorCards(d);
+            updateDataSourceBadge('remote');
+            updateVisibility();
+            updateConnectionStatus(true, `MQTT (${state.mqtt.deviceId})`);
+        }
+    }
+
+    function createEmptySensorData(deviceId) {
+        return {
+            device: deviceId,
+            sensors: {
+                dht11: { temperature: null, humidity: null },
+                soil1: { moisture: null },
+                soil2: { moisture: null }
+            },
+            relays: {
+                pump: false,
+                growlight: false
+            },
+            thresholds: {
+                temp_low: 10,
+                temp_high: 35,
+                humidity_low: 30,
+                soil_dry: 25,
+                soil_wet: 85
+            }
+        };
+    }
+
+    function addLiveChartPoint(temp, hum, soil) {
+        if (!state.charts.climate || !state.charts.soil) return;
+        const now = new Date();
+        const timeLabel = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+
+        if (temp != null && !isNaN(temp) && hum != null && !isNaN(hum)) {
+            const climateLabels = state.charts.climate.data.labels;
+            if (climateLabels.length > 30) {
+                climateLabels.shift();
+                state.charts.climate.data.datasets[0].data.shift();
+                state.charts.climate.data.datasets[1].data.shift();
+            }
+            climateLabels.push(timeLabel);
+            state.charts.climate.data.datasets[0].data.push(temp);
+            state.charts.climate.data.datasets[1].data.push(hum);
+            state.charts.climate.update('none');
+        }
+
+        if (soil != null && !isNaN(soil)) {
+            const soilLabels = state.charts.soil.data.labels;
+            if (soilLabels.length > 30) {
+                soilLabels.shift();
+                state.charts.soil.data.datasets[0].data.shift();
+            }
+            soilLabels.push(timeLabel);
+            state.charts.soil.data.datasets[0].data.push(soil);
+            state.charts.soil.update('none');
+        }
+    }
+
     // ── Init ────────────────────────────────────────────────
 
     function init() {
@@ -695,6 +980,7 @@
         bindEvents();
         initCharts();
         renderDeviceChips();
+        initMQTT();
 
         // Auto-select first device and start polling
         if (state.devices.length > 0) {

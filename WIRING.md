@@ -7,8 +7,11 @@
 | 🌡️ **DHT11**   | VCC  | **3V3**     | 3.3V power                   |
 |                 | DATA | **GPIO 4**  | Add 10kΩ pull-up to 3V3      |
 |                 | GND  | **GND**     |                              |
-| 🌱 **Soil Moisture** | VCC  | **3V3**     | 3.3V power                   |
+| 🌱 **Soil Moisture 1** | VCC  | **3V3**     | 3.3V power                   |
 |                 | AO   | **GPIO 34** | Analog input (ADC1_CH6)      |
+|                 | GND  | **GND**     |                              |
+| 🌱 **Soil Moisture 2** | VCC  | **3V3**     | 3.3V power                   |
+|                 | AO   | **GPIO 35** | Analog input (ADC1_CH7)      |
 |                 | GND  | **GND**     |                              |
 | 📺 **LCD I2C**  | VCC  | **5V**      | ⚡ Needs 5V (VIN pin)        |
 |                 | GND  | **GND**     |                              |
@@ -39,7 +42,8 @@
                   │             │
     DHT11 DATA ──│ GPIO 4      │
                   │             │
-       Soil AO ──│ GPIO 34     │
+      Soil 1 AO ──│ GPIO 34     │
+      Soil 2 AO ──│ GPIO 35     │
                   │             │
    Grow Light  ──│ GPIO 14     │── Relay IN (grow light)
    Water Pump  ──│ GPIO 27     │── Relay IN (pump)

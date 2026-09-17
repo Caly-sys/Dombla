@@ -25,3 +25,8 @@ desktop.ini
 # Agents/AI
 .agents/
 .gemini/
+
+# Secrets (NEVER commit these)
+esp32-firmware/src/secrets.h
+web-dashboard/.env
+.env
