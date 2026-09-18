@@ -14,6 +14,8 @@
 #include <ArduinoJson.h>
 #include <Wire.h>
 #include <PubSubClient.h>
+#include <time.h>
+#include <Preferences.h>
 #include "config.h"
 
 // ── HiveMQ Cloud Root CA Certificate ────────────────────────
@@ -72,12 +74,33 @@ float soilMoisture2 = 0.0;   // percentage 0-100 (sensor 2)
 int   soilRaw2      = 0;
 
 // Relay states
-bool pumpState      = false;
-bool growlightState = false;
+bool pumpState      = RELAY_PUMP_DEFAULT_ON;      // false (OFF at boot)
+bool growlightState = RELAY_GROWLIGHT_DEFAULT_ON; // true (ON at boot)
 
 // LCD page cycling
 int   lcdPage       = 0;
-const int LCD_PAGES  = 4;  // Added MQTT status page
+const int LCD_PAGES  = 5;  // Added Time & Schedules status page
+
+// ── Schedules & Automation Data ─────────────────────────────
+struct ScheduleRule {
+    String id;
+    String name;
+    String device;    // "growlight" or "pump"
+    String onTime;    // "HH:MM" (24h)
+    String offTime;   // "HH:MM" (24h)
+    uint8_t daysMask; // 7-bit mask: bit 0 = Sun ... bit 6 = Sat (127 = every day)
+    bool enabled;
+};
+
+ScheduleRule schedules[MAX_SCHEDULES];
+int scheduleCount = 0;
+Preferences preferences;
+
+// Time & Schedule tracking
+bool timeSyncedOnce = false;
+unsigned long lastNTPResync = 0;
+int lastEvaluatedMinute = -1;
+int lastEvaluatedDay = -1;
 
 // Timing
 unsigned long lastDHTRead  = 0;
@@ -92,6 +115,14 @@ bool mqttConnected = false;
 
 // Uptime
 unsigned long bootTime = 0;
+
+// Push-button debounce state
+bool btnPumpLastState       = LOW;
+bool btnGrowlightLastState  = LOW;
+bool btnPumpStable          = LOW;
+bool btnGrowlightStable     = LOW;
+unsigned long btnPumpLastChange      = 0;
+unsigned long btnGrowlightLastChange = 0;
 
 // ── History Buffer ──────────────────────────────────────────
 
@@ -144,11 +175,28 @@ void setPump(bool on);
 void setGrowlight(bool on);
 
 void setupRelays() {
+    // For active-LOW relays (RELAY_ACTIVE_LOW = true):
+    // HIGH = Relay OFF (de-energized)
+    // LOW  = Relay ON  (energized)
+    //
+    // CRITICAL: Pre-write to the GPIO output latch BEFORE calling pinMode(..., OUTPUT).
+    // In ESP32 hardware, pinMode() enables the output driver with whatever is in the latch (default 0).
+    // If we call pinMode() before digitalWrite(), the pin briefly goes LOW (active), causing
+    // the pump relay to trigger/click on power-up! Pre-writing prevents any startup pulse.
+
+    // 1. Water Pump: OFF by default at boot (write HIGH for active-LOW)
+    digitalWrite(RELAY_PUMP_PIN, (RELAY_ACTIVE_LOW ? (RELAY_PUMP_DEFAULT_ON ? LOW : HIGH) : (RELAY_PUMP_DEFAULT_ON ? HIGH : LOW)));
     pinMode(RELAY_PUMP_PIN, OUTPUT);
+    digitalWrite(RELAY_PUMP_PIN, (RELAY_ACTIVE_LOW ? (RELAY_PUMP_DEFAULT_ON ? LOW : HIGH) : (RELAY_PUMP_DEFAULT_ON ? HIGH : LOW)));
+    pumpState = RELAY_PUMP_DEFAULT_ON;
+
+    // 2. Grow Light: ON by default at boot (write LOW for active-LOW)
+    digitalWrite(RELAY_GROWLIGHT_PIN, (RELAY_ACTIVE_LOW ? (RELAY_GROWLIGHT_DEFAULT_ON ? LOW : HIGH) : (RELAY_GROWLIGHT_DEFAULT_ON ? HIGH : LOW)));
     pinMode(RELAY_GROWLIGHT_PIN, OUTPUT);
-    // Safe default: both OFF at boot
-    setPump(false);
-    setGrowlight(false);
+    digitalWrite(RELAY_GROWLIGHT_PIN, (RELAY_ACTIVE_LOW ? (RELAY_GROWLIGHT_DEFAULT_ON ? LOW : HIGH) : (RELAY_GROWLIGHT_DEFAULT_ON ? HIGH : LOW)));
+    growlightState = RELAY_GROWLIGHT_DEFAULT_ON;
+
+    Serial.println("[Relays] Initialized: Water Pump = OFF, Grow Light = ON");
 }
 
 void setPump(bool on) {
@@ -169,6 +217,88 @@ void setGrowlight(bool on) {
         digitalWrite(RELAY_GROWLIGHT_PIN, on ? HIGH : LOW);
     }
     Serial.printf("[Relay] Growlight %s\n", on ? "ON" : "OFF");
+}
+
+// ── Physical Push-Buttons ────────────────────────────────────────
+// 3-pin button modules (VCC→3.3V, GND→GND, OUT→GPIO)
+// OUT is HIGH when pressed. Debounced rising-edge detection.
+
+void setupButtons() {
+    pinMode(BTN_PUMP_PIN, INPUT_PULLDOWN);
+    pinMode(BTN_GROWLIGHT_PIN, INPUT_PULLDOWN);
+
+    // Give internal pull-downs a brief moment to settle
+    delay(10);
+
+    // Read initial states so whatever state the pins are in at boot
+    // is treated as the resting baseline — NOT as a rising-edge press!
+    btnPumpLastState       = digitalRead(BTN_PUMP_PIN);
+    btnGrowlightLastState  = digitalRead(BTN_GROWLIGHT_PIN);
+    btnPumpStable          = btnPumpLastState;
+    btnGrowlightStable     = btnGrowlightLastState;
+    btnPumpLastChange      = millis();
+    btnGrowlightLastChange = millis();
+
+    Serial.println("[Buttons] Push-buttons initialized (pump=GPIO" +
+                   String(BTN_PUMP_PIN) + ", growlight=GPIO" +
+                   String(BTN_GROWLIGHT_PIN) + ")");
+}
+
+void pollButtons() {
+    unsigned long now = millis();
+
+    // Ignore button triggers during startup settling window (first 1000ms)
+    if (now - bootTime < BTN_BOOT_LOCKOUT_MS) {
+        btnPumpLastState       = digitalRead(BTN_PUMP_PIN);
+        btnGrowlightLastState  = digitalRead(BTN_GROWLIGHT_PIN);
+        btnPumpStable          = btnPumpLastState;
+        btnGrowlightStable     = btnGrowlightLastState;
+        btnPumpLastChange      = now;
+        btnGrowlightLastChange = now;
+        return;
+    }
+
+    // --- Pump button ---
+    bool pumpReading = digitalRead(BTN_PUMP_PIN);
+    if (pumpReading != btnPumpLastState) {
+        btnPumpLastChange = now;  // Reset debounce timer
+    }
+    if ((now - btnPumpLastChange) >= BTN_DEBOUNCE_MS) {
+        if (pumpReading != btnPumpStable) {
+            btnPumpStable = pumpReading;
+            if (btnPumpStable == HIGH) {
+                // Toggle pump relay
+                setPump(!pumpState);
+                Serial.println("[Button] Pump toggled via physical button");
+                // Publish new state to MQTT so dashboards stay in sync
+                if (mqttClient.connected()) {
+                    String topic = String("dombla/") + MQTT_DEVICE_ID + "/pump/state";
+                    mqttClient.publish(topic.c_str(), pumpState ? "ON" : "OFF", true);
+                }
+            }
+        }
+    }
+    btnPumpLastState = pumpReading;
+
+    // --- Grow Light button ---
+    bool glReading = digitalRead(BTN_GROWLIGHT_PIN);
+    if (glReading != btnGrowlightLastState) {
+        btnGrowlightLastChange = now;
+    }
+    if ((now - btnGrowlightLastChange) >= BTN_DEBOUNCE_MS) {
+        if (glReading != btnGrowlightStable) {
+            btnGrowlightStable = glReading;
+            if (btnGrowlightStable == HIGH) {
+                setGrowlight(!growlightState);
+                Serial.println("[Button] Growlight toggled via physical button");
+                if (mqttClient.connected()) {
+                    String topic = String("dombla/") + MQTT_DEVICE_ID + "/growlight/state";
+                    mqttClient.publish(topic.c_str(), growlightState ? "ON" : "OFF", true);
+                }
+            }
+        }
+    }
+    btnGrowlightLastState = glReading;
 }
 
 // ── Sensor Reading ──────────────────────────────────────────
@@ -199,6 +329,260 @@ void recordHistory() {
 
     historyIndex = (historyIndex + 1) % HISTORY_SIZE;
     if (historyCount < HISTORY_SIZE) historyCount++;
+}
+
+// ── Time & NTP Functions (WIB / UTC+7) ──────────────────────
+
+bool isTimeSynchronized() {
+    struct tm timeinfo;
+    if (!getLocalTime(&timeinfo, 0)) return false;
+    return (timeinfo.tm_year >= (2025 - 1900));
+}
+
+String getCurrentTimeString() {
+    struct tm timeinfo;
+    if (!getLocalTime(&timeinfo, 0) || timeinfo.tm_year < (2025 - 1900)) {
+        return "--:--:--";
+    }
+    char buf[12];
+    snprintf(buf, sizeof(buf), "%02d:%02d:%02d", timeinfo.tm_hour, timeinfo.tm_min, timeinfo.tm_sec);
+    return String(buf);
+}
+
+String getCurrentDateString() {
+    struct tm timeinfo;
+    if (!getLocalTime(&timeinfo, 0) || timeinfo.tm_year < (2025 - 1900)) {
+        return "----/--/--";
+    }
+    char buf[16];
+    snprintf(buf, sizeof(buf), "%04d-%02d-%02d", timeinfo.tm_year + 1900, timeinfo.tm_mon + 1, timeinfo.tm_mday);
+    return String(buf);
+}
+
+String getCurrentDateTimeString() {
+    struct tm timeinfo;
+    if (!getLocalTime(&timeinfo, 0) || timeinfo.tm_year < (2025 - 1900)) {
+        return "----/--/-- --:--:--";
+    }
+    char buf[25];
+    snprintf(buf, sizeof(buf), "%04d-%02d-%02d %02d:%02d:%02d", 
+             timeinfo.tm_year + 1900, timeinfo.tm_mon + 1, timeinfo.tm_mday,
+             timeinfo.tm_hour, timeinfo.tm_min, timeinfo.tm_sec);
+    return String(buf);
+}
+
+void setupNTP() {
+    Serial.println("[NTP] Initializing NTP time sync (WIB / UTC+7)...");
+    configTime(NTP_TIMEZONE_OFFSET, NTP_DAYLIGHT_OFFSET, NTP_SERVER_1, NTP_SERVER_2, NTP_SERVER_3);
+}
+
+// Forward declaration for MQTT schedule publish
+void publishMqttSchedules();
+
+// ── Schedule Persistence (NVS / Preferences) ────────────────
+
+bool saveSchedules() {
+    if (!preferences.begin(SCHEDULES_NVS_NAMESPACE, false)) {
+        Serial.println("[Schedules] Failed to open NVS for writing!");
+        return false;
+    }
+    JsonDocument doc;
+    JsonArray arr = doc.to<JsonArray>();
+    for (int i = 0; i < scheduleCount; i++) {
+        JsonObject obj = arr.add<JsonObject>();
+        obj["id"] = schedules[i].id;
+        obj["name"] = schedules[i].name;
+        obj["device"] = schedules[i].device;
+        obj["onTime"] = schedules[i].onTime;
+        obj["offTime"] = schedules[i].offTime;
+        obj["daysMask"] = schedules[i].daysMask;
+        obj["enabled"] = schedules[i].enabled;
+    }
+    String jsonStr;
+    serializeJson(doc, jsonStr);
+    size_t written = preferences.putString(SCHEDULES_NVS_KEY, jsonStr);
+    preferences.end();
+    Serial.printf("[Schedules] Saved %d schedules to NVS (%u bytes)\n", scheduleCount, (unsigned int)written);
+    return written > 0;
+}
+
+void loadSchedules() {
+    if (!preferences.begin(SCHEDULES_NVS_NAMESPACE, false)) {
+        Serial.println("[Schedules] Failed to open NVS for reading!");
+        return;
+    }
+    String jsonStr = preferences.getString(SCHEDULES_NVS_KEY, "");
+    preferences.end();
+
+    scheduleCount = 0;
+    if (jsonStr.length() > 0) {
+        JsonDocument doc;
+        DeserializationError err = deserializeJson(doc, jsonStr);
+        if (!err && doc.is<JsonArray>()) {
+            JsonArray arr = doc.as<JsonArray>();
+            for (JsonObject obj : arr) {
+                if (scheduleCount >= MAX_SCHEDULES) break;
+                const char* idStr = obj["id"];
+                schedules[scheduleCount].id = (idStr && strlen(idStr) > 0) ? String(idStr) : (String("sch_") + String(scheduleCount + 1));
+
+                const char* nameStr = obj["name"];
+                schedules[scheduleCount].name = (nameStr && strlen(nameStr) > 0) ? String(nameStr) : (String("Schedule ") + String(scheduleCount + 1));
+
+                const char* devStr = obj["device"];
+                schedules[scheduleCount].device = (devStr && strlen(devStr) > 0) ? String(devStr) : String("growlight");
+
+                const char* onStr = obj["onTime"];
+                schedules[scheduleCount].onTime = onStr ? String(onStr) : String("");
+
+                const char* offStr = obj["offTime"];
+                schedules[scheduleCount].offTime = offStr ? String(offStr) : String("");
+
+                schedules[scheduleCount].daysMask = obj["daysMask"] | 127;
+                schedules[scheduleCount].enabled = obj["enabled"] | true;
+                scheduleCount++;
+            }
+            Serial.printf("[Schedules] Loaded %d schedules from NVS\n", scheduleCount);
+            return;
+        }
+    }
+
+    // Default schedule if none found: Grow Light ON at 19:00, OFF at 06:00, every day
+    Serial.println("[Schedules] No schedules found in NVS. Creating default Grow Light schedule (19:00 ON -> 06:00 OFF)...");
+    scheduleCount = 1;
+    schedules[0].id = "sch_growlight_default";
+    schedules[0].name = "Grow Light Overnight";
+    schedules[0].device = "growlight";
+    schedules[0].onTime = "19:00";
+    schedules[0].offTime = "06:00";
+    schedules[0].daysMask = 127; // All days
+    schedules[0].enabled = true;
+    saveSchedules();
+}
+
+// ── Schedule Automation Engine ──────────────────────────────
+
+bool isTimeInSpan(int curHour, int curMin, const String &onTime, const String &offTime) {
+    if (onTime.length() < 4 || offTime.length() < 4) return false;
+    int onH = onTime.substring(0, 2).toInt();
+    int onM = onTime.substring(3, 5).toInt();
+    int offH = offTime.substring(0, 2).toInt();
+    int offM = offTime.substring(3, 5).toInt();
+
+    int curMins = curHour * 60 + curMin;
+    int startMins = onH * 60 + onM;
+    int stopMins = offH * 60 + offM;
+
+    if (startMins < stopMins) {
+        return (curMins >= startMins && curMins < stopMins);
+    } else if (startMins > stopMins) {
+        // Overnight window spanning midnight (e.g. 19:00 to 06:00)
+        return (curMins >= startMins || curMins < stopMins);
+    }
+    return false;
+}
+
+void applyAutomationsState(bool isSyncOrEdit = false) {
+    struct tm timeinfo;
+    if (!getLocalTime(&timeinfo, 0)) return;
+    if (timeinfo.tm_year < (2025 - 1900)) return;
+
+    uint8_t todayBit = (1 << timeinfo.tm_wday);
+
+    for (int i = 0; i < scheduleCount; i++) {
+        if (!schedules[i].enabled) continue;
+        if ((schedules[i].daysMask & todayBit) == 0) continue;
+
+        // For grow light night automation, enforce state according to current time
+        if (schedules[i].device == "growlight" && schedules[i].onTime.length() >= 4 && schedules[i].offTime.length() >= 4) {
+            bool isNight = isTimeInSpan(timeinfo.tm_hour, timeinfo.tm_min, schedules[i].onTime, schedules[i].offTime);
+            if (isSyncOrEdit) {
+                Serial.printf("[Automation] Setting Grow Light state for current time (%02d:%02d WIB) -> %s\n",
+                              timeinfo.tm_hour, timeinfo.tm_min, isNight ? "ON (Night)" : "OFF (Day)");
+                setGrowlight(isNight);
+                if (mqttClient.connected()) {
+                    String topic = String("dombla/") + MQTT_DEVICE_ID + "/growlight/state";
+                    mqttClient.publish(topic.c_str(), isNight ? "ON" : "OFF", true);
+                }
+            }
+        }
+    }
+}
+
+void evaluateSchedules() {
+    struct tm timeinfo;
+    if (!getLocalTime(&timeinfo, 0)) return;
+    if (timeinfo.tm_year < (2025 - 1900)) return; // Clock not yet valid
+
+    // Only run on minute transitions
+    if (timeinfo.tm_min == lastEvaluatedMinute && timeinfo.tm_mday == lastEvaluatedDay) {
+        return;
+    }
+    lastEvaluatedMinute = timeinfo.tm_min;
+    lastEvaluatedDay = timeinfo.tm_mday;
+
+    char curTimeBuf[6];
+    snprintf(curTimeBuf, sizeof(curTimeBuf), "%02d:%02d", timeinfo.tm_hour, timeinfo.tm_min);
+    String currentTime = String(curTimeBuf);
+    uint8_t todayBit = (1 << timeinfo.tm_wday); // 0=Sun, 1=Mon, ..., 6=Sat
+
+    for (int i = 0; i < scheduleCount; i++) {
+        if (!schedules[i].enabled) continue;
+        if ((schedules[i].daysMask & todayBit) == 0) continue; // Not scheduled for today
+
+        // Check ON trigger
+        if (schedules[i].onTime.length() >= 4 && schedules[i].onTime == currentTime) {
+            Serial.printf("[Automation] Triggered ON: '%s' for %s at %s WIB\n",
+                          schedules[i].name.c_str(), schedules[i].device.c_str(), currentTime.c_str());
+            if (schedules[i].device == "growlight") {
+                setGrowlight(true);
+                if (mqttClient.connected()) {
+                    String topic = String("dombla/") + MQTT_DEVICE_ID + "/growlight/state";
+                    mqttClient.publish(topic.c_str(), "ON", true);
+                }
+            } else if (schedules[i].device == "pump") {
+                setPump(true);
+                if (mqttClient.connected()) {
+                    String topic = String("dombla/") + MQTT_DEVICE_ID + "/pump/state";
+                    mqttClient.publish(topic.c_str(), "ON", true);
+                }
+            }
+        }
+
+        // Check OFF trigger
+        if (schedules[i].offTime.length() >= 4 && schedules[i].offTime == currentTime) {
+            Serial.printf("[Automation] Triggered OFF: '%s' for %s at %s WIB\n",
+                          schedules[i].name.c_str(), schedules[i].device.c_str(), currentTime.c_str());
+            if (schedules[i].device == "growlight") {
+                setGrowlight(false);
+                if (mqttClient.connected()) {
+                    String topic = String("dombla/") + MQTT_DEVICE_ID + "/growlight/state";
+                    mqttClient.publish(topic.c_str(), "OFF", true);
+                }
+            } else if (schedules[i].device == "pump") {
+                setPump(false);
+                if (mqttClient.connected()) {
+                    String topic = String("dombla/") + MQTT_DEVICE_ID + "/pump/state";
+                    mqttClient.publish(topic.c_str(), "OFF", true);
+                }
+            }
+        }
+    }
+}
+
+void checkNTPStatus() {
+    if (!timeSyncedOnce) {
+        struct tm timeinfo;
+        if (getLocalTime(&timeinfo, 0) && timeinfo.tm_year >= (2025 - 1900)) {
+            timeSyncedOnce = true;
+            lastEvaluatedMinute = timeinfo.tm_min;
+            lastEvaluatedDay = timeinfo.tm_mday;
+            Serial.printf("[NTP] Clock synchronized: %s %s WIB\n",
+                          getCurrentDateString().c_str(), getCurrentTimeString().c_str());
+            // Immediately apply active automation states (e.g. if currently night, turn grow light ON)
+            applyAutomationsState(true);
+            publishMqttSchedules();
+        }
+    }
 }
 
 // ── LCD Display ─────────────────────────────────────────────
@@ -266,6 +650,26 @@ void updateLCD() {
             lcd.print((int)soilMoisture);
             lcd.print("%");
             break;
+
+        case 4:  // Clock & Schedules
+            lcd.setCursor(0, 0);
+            lcd.print("Time: ");
+            if (isTimeSynchronized()) {
+                lcd.print(getCurrentTimeString().substring(0, 5));
+                lcd.print(" WIB");
+            } else {
+                lcd.print("Syncing..");
+            }
+
+            lcd.setCursor(0, 1);
+            {
+                int activeCount = 0;
+                for (int i = 0; i < scheduleCount; i++) {
+                    if (schedules[i].enabled) activeCount++;
+                }
+                lcd.printf("Sch: %d active", activeCount);
+            }
+            break;
     }
 
     lcdPage = (lcdPage + 1) % LCD_PAGES;
@@ -312,6 +716,16 @@ void handleStatus() {
     doc["mac"]        = WiFi.macAddress();
     doc["free_heap"]  = ESP.getFreeHeap();
     doc["mqtt"]       = mqttConnected;
+
+    // Time & Clock info
+    JsonObject timeObj = doc["time"].to<JsonObject>();
+    timeObj["current"]  = getCurrentTimeString();
+    timeObj["date"]     = getCurrentDateString();
+    timeObj["datetime"] = getCurrentDateTimeString();
+    timeObj["synced"]   = isTimeSynchronized();
+    timeObj["timezone"] = "WIB (UTC+7)";
+
+    doc["schedules_count"] = scheduleCount;
 
     JsonObject sensors = doc["sensors"].to<JsonObject>();
 
@@ -459,6 +873,114 @@ void handleRelay() {
     server.send(200, "application/json", output);
 }
 
+// ── API: GET /api/time ──────────────────────────────────────
+
+void handleTime() {
+    sendCORS();
+
+    JsonDocument doc;
+    time_t now;
+    time(&now);
+
+    doc["time"]     = getCurrentTimeString();
+    doc["date"]     = getCurrentDateString();
+    doc["datetime"] = getCurrentDateTimeString();
+    doc["epoch"]    = now;
+    doc["synced"]   = isTimeSynchronized();
+    doc["timezone"] = "WIB (UTC+7)";
+
+    String output;
+    serializeJson(doc, output);
+    server.send(200, "application/json", output);
+}
+
+// ── API: GET /api/schedules ─────────────────────────────────
+
+void handleGetSchedules() {
+    sendCORS();
+
+    JsonDocument doc;
+    doc["time"]     = getCurrentTimeString();
+    doc["date"]     = getCurrentDateString();
+    doc["synced"]   = isTimeSynchronized();
+    doc["timezone"] = "WIB (UTC+7)";
+
+    JsonArray arr = doc["schedules"].to<JsonArray>();
+    for (int i = 0; i < scheduleCount; i++) {
+        JsonObject obj = arr.add<JsonObject>();
+        obj["id"]       = schedules[i].id;
+        obj["name"]     = schedules[i].name;
+        obj["device"]   = schedules[i].device;
+        obj["onTime"]   = schedules[i].onTime;
+        obj["offTime"]  = schedules[i].offTime;
+        obj["daysMask"] = schedules[i].daysMask;
+        obj["enabled"]  = schedules[i].enabled;
+    }
+
+    String output;
+    serializeJson(doc, output);
+    server.send(200, "application/json", output);
+}
+
+// ── API: POST /api/schedules ────────────────────────────────
+
+void handlePostSchedules() {
+    sendCORS();
+
+    if (!server.hasArg("plain")) {
+        server.send(400, "application/json", "{\"error\":\"missing request body\"}");
+        return;
+    }
+
+    String body = server.arg("plain");
+    JsonDocument doc;
+    DeserializationError err = deserializeJson(doc, body);
+    if (err) {
+        server.send(400, "application/json", "{\"error\":\"invalid json\"}");
+        return;
+    }
+
+    JsonArray arr;
+    if (doc.is<JsonArray>()) {
+        arr = doc.as<JsonArray>();
+    } else if (doc["schedules"].is<JsonArray>()) {
+        arr = doc["schedules"].as<JsonArray>();
+    } else {
+        server.send(400, "application/json", "{\"error\":\"expected array of schedules\"}");
+        return;
+    }
+
+    scheduleCount = 0;
+    for (JsonObject obj : arr) {
+        if (scheduleCount >= MAX_SCHEDULES) break;
+        const char* idStr = obj["id"];
+        schedules[scheduleCount].id = (idStr && strlen(idStr) > 0) ? String(idStr) : (String("sch_") + String(millis()) + "_" + String(scheduleCount));
+
+        const char* nameStr = obj["name"];
+        schedules[scheduleCount].name = (nameStr && strlen(nameStr) > 0) ? String(nameStr) : (String("Schedule ") + String(scheduleCount + 1));
+
+        const char* devStr = obj["device"];
+        schedules[scheduleCount].device = (devStr && strlen(devStr) > 0) ? String(devStr) : String("growlight");
+
+        const char* onStr = obj["onTime"];
+        schedules[scheduleCount].onTime = onStr ? String(onStr) : String("");
+
+        const char* offStr = obj["offTime"];
+        schedules[scheduleCount].offTime = offStr ? String(offStr) : String("");
+
+        schedules[scheduleCount].daysMask = obj["daysMask"] | 127;
+        schedules[scheduleCount].enabled = obj["enabled"] | true;
+        scheduleCount++;
+    }
+
+    saveSchedules();
+    applyAutomationsState(true);
+    publishMqttSchedules();
+
+    // Return updated schedules list
+    handleGetSchedules();
+}
+
 // ── API: GET / (Root — simple info page) ────────────────────
 
 void handleRoot() {
@@ -476,45 +998,148 @@ void handleRoot() {
                   ".label{font-size:.75em;color:#8892b0;text-transform:uppercase;letter-spacing:1px;}"
                   "</style></head><body><div class='card'>"
                   "<h1>🌱 Dombla</h1><p>" + String(DEVICE_NAME) + "</p>"
+                  "<p style='color:#64ffda;font-weight:bold;font-size:1.1em;'>Clock: " + getCurrentTimeString() + " WIB</p>"
                   "<div class='grid'>"
                   "<div class='metric'><div class='label'>Temp</div><div class='val'>" + String(temperature, 1) + "°</div></div>"
                   "<div class='metric'><div class='label'>Humidity</div><div class='val'>" + String(humidity, 1) + "%</div></div>"
                   "<div class='metric'><div class='label'>Soil 1</div><div class='val'>" + String(soilMoisture, 1) + "%</div></div>"
                   "<div class='metric'><div class='label'>Soil 2</div><div class='val'>" + String(soilMoisture2, 1) + "%</div></div>"
                   "</div>"
-                  "<p style='margin-top:20px;font-size:.8em;'>API: /api/status · /api/sensors · /api/history · /api/relay</p>"
+                  "<p style='margin-top:20px;font-size:.8em;'>API: /api/status · /api/sensors · /api/history · /api/relay · /api/time · /api/schedules</p>"
                   "<p style='font-size:.7em;color:" + String(mqttConnected ? "#0cce6b" : "#f23f43") + ";'>MQTT: " + String(mqttConnected ? "Connected" : "Offline") + "</p>"
                   "</div></body></html>";
     server.send(200, "text/html", html);
+}
+
+// ── MQTT Schedules Handlers ─────────────────────────────────
+
+void publishMqttSchedules() {
+    if (!mqttClient.connected()) return;
+
+    JsonDocument doc;
+    doc["time"]   = getCurrentTimeString();
+    doc["date"]   = getCurrentDateString();
+    doc["synced"] = isTimeSynchronized();
+
+    JsonArray arr = doc["schedules"].to<JsonArray>();
+    for (int i = 0; i < scheduleCount; i++) {
+        JsonObject obj = arr.add<JsonObject>();
+        obj["id"]       = schedules[i].id;
+        obj["name"]     = schedules[i].name;
+        obj["device"]   = schedules[i].device;
+        obj["onTime"]   = schedules[i].onTime;
+        obj["offTime"]  = schedules[i].offTime;
+        obj["daysMask"] = schedules[i].daysMask;
+        obj["enabled"]  = schedules[i].enabled;
+    }
+
+    String output;
+    serializeJson(doc, output);
+    String topic = String("dombla/") + MQTT_DEVICE_ID + "/schedules";
+    mqttClient.publish(topic.c_str(), output.c_str(), true);
+    Serial.println("[MQTT] Published schedules state");
+}
+
+void handleMqttSchedulesSet(const String& payload) {
+    JsonDocument doc;
+    DeserializationError err = deserializeJson(doc, payload);
+    if (err) {
+        Serial.printf("[MQTT] Error parsing schedules JSON: %s\n", err.c_str());
+        return;
+    }
+
+    JsonArray arr;
+    if (doc.is<JsonArray>()) {
+        arr = doc.as<JsonArray>();
+    } else if (doc["schedules"].is<JsonArray>()) {
+        arr = doc["schedules"].as<JsonArray>();
+    } else {
+        Serial.println("[MQTT] Invalid schedules format (expected array)");
+        return;
+    }
+
+    scheduleCount = 0;
+    for (JsonObject obj : arr) {
+        if (scheduleCount >= MAX_SCHEDULES) break;
+        const char* idStr = obj["id"];
+        schedules[scheduleCount].id = (idStr && strlen(idStr) > 0) ? String(idStr) : (String("sch_") + String(millis()) + "_" + String(scheduleCount));
+
+        const char* nameStr = obj["name"];
+        schedules[scheduleCount].name = (nameStr && strlen(nameStr) > 0) ? String(nameStr) : (String("Schedule ") + String(scheduleCount + 1));
+
+        const char* devStr = obj["device"];
+        schedules[scheduleCount].device = (devStr && strlen(devStr) > 0) ? String(devStr) : String("growlight");
+
+        const char* onStr = obj["onTime"];
+        schedules[scheduleCount].onTime = onStr ? String(onStr) : String("");
+
+        const char* offStr = obj["offTime"];
+        schedules[scheduleCount].offTime = offStr ? String(offStr) : String("");
+
+        schedules[scheduleCount].daysMask = obj["daysMask"] | 127;
+        schedules[scheduleCount].enabled = obj["enabled"] | true;
+        scheduleCount++;
+    }
+
+    saveSchedules();
+    applyAutomationsState(true);
+    publishMqttSchedules();
+    Serial.printf("[MQTT] Updated and saved %d schedules\n", scheduleCount);
 }
 
 // ── MQTT ────────────────────────────────────────────────────
 
 void mqttCallback(char* topic, byte* payload, unsigned int length) {
     String msg;
+    msg.reserve(length + 1);
     for (unsigned int i = 0; i < length; i++) {
         msg += (char)payload[i];
     }
     msg.trim();
-    msg.toUpperCase();
 
     String topicStr = String(topic);
-    Serial.printf("[MQTT] Received: %s = %s\n", topic, msg.c_str());
+    Serial.printf("[MQTT] Received on: %s (%u bytes)\n", topic, length);
+
+    // Schedules update command
+    String schedSetTopic = String("dombla/") + MQTT_DEVICE_ID + "/schedules/set";
+    if (topicStr == schedSetTopic) {
+        handleMqttSchedulesSet(msg);
+        return;
+    }
+
+    String upperMsg = msg;
+    upperMsg.toUpperCase();
 
     // Pump control command
     String pumpSetTopic = String("dombla/") + MQTT_DEVICE_ID + "/pump/set";
     if (topicStr == pumpSetTopic) {
-        if (msg == "ON") {
+        if (upperMsg == "ON") {
             setPump(true);
-        } else if (msg == "OFF") {
+        } else if (upperMsg == "OFF") {
             setPump(false);
         } else {
-            Serial.printf("[MQTT] Unknown pump command: %s\n", msg.c_str());
+            Serial.printf("[MQTT] Unknown pump command: %s\n", upperMsg.c_str());
             return;
         }
         // Publish actual pump state back
         String stateTopic = String("dombla/") + MQTT_DEVICE_ID + "/pump/state";
         mqttClient.publish(stateTopic.c_str(), pumpState ? "ON" : "OFF", true);
+    }
+
+    // Growlight control command
+    String growlightSetTopic = String("dombla/") + MQTT_DEVICE_ID + "/growlight/set";
+    if (topicStr == growlightSetTopic) {
+        if (upperMsg == "ON") {
+            setGrowlight(true);
+        } else if (upperMsg == "OFF") {
+            setGrowlight(false);
+        } else {
+            Serial.printf("[MQTT] Unknown growlight command: %s\n", upperMsg.c_str());
+            return;
+        }
+        // Publish actual grow light state back
+        String stateTopic = String("dombla/") + MQTT_DEVICE_ID + "/growlight/state";
+        mqttClient.publish(stateTopic.c_str(), growlightState ? "ON" : "OFF", true);
     }
 }
 
@@ -561,14 +1186,28 @@ bool mqttReconnect() {
         // Publish online status
         mqttClient.publish(statusTopic.c_str(), "online", true);
 
-        // Publish initial pump state
+        // Publish initial pump and grow light state
         String pumpStateTopic = String("dombla/") + MQTT_DEVICE_ID + "/pump/state";
         mqttClient.publish(pumpStateTopic.c_str(), pumpState ? "ON" : "OFF", true);
 
-        // Subscribe to pump control commands
+        String growlightStateTopic = String("dombla/") + MQTT_DEVICE_ID + "/growlight/state";
+        mqttClient.publish(growlightStateTopic.c_str(), growlightState ? "ON" : "OFF", true);
+
+        // Subscribe to relay commands
         String pumpSetTopic = String("dombla/") + MQTT_DEVICE_ID + "/pump/set";
         mqttClient.subscribe(pumpSetTopic.c_str(), 1);
-        Serial.println("[MQTT] Subscribed to: " + pumpSetTopic);
+
+        String growlightSetTopic = String("dombla/") + MQTT_DEVICE_ID + "/growlight/set";
+        mqttClient.subscribe(growlightSetTopic.c_str(), 1);
+
+        // Subscribe to schedules command
+        String schedSetTopic = String("dombla/") + MQTT_DEVICE_ID + "/schedules/set";
+        mqttClient.subscribe(schedSetTopic.c_str(), 1);
+
+        Serial.println("[MQTT] Subscribed to pump/set, growlight/set, and schedules/set");
+
+        // Publish current schedules
+        publishMqttSchedules();
     } else {
         mqttConnected = false;
         Serial.printf("[MQTT] Connection failed, rc=%d\n", mqttClient.state());
@@ -586,6 +1225,7 @@ void mqttPublishSensors() {
     mqttClient.publish((prefix + "humidity").c_str(),    String(humidity, 1).c_str(), true);
     mqttClient.publish((prefix + "soil1").c_str(),       String(soilMoisture, 1).c_str(), true);
     mqttClient.publish((prefix + "soil2").c_str(),       String(soilMoisture2, 1).c_str(), true);
+    mqttClient.publish((prefix + "time").c_str(),        getCurrentTimeString().c_str(), true);
 
     Serial.println("[MQTT] Sensors published");
 }
@@ -642,8 +1282,38 @@ void setup() {
 
     bootTime = millis();
 
+    // 1. Initialize relays IMMEDIATELY at boot to lock safe states (Pump=OFF, GrowLight=ON)
+    // Pre-writes the pin states before enabling output driver to prevent active-LOW glitch
+    setupRelays();
+
+    // 2. Initialize push-button inputs and baseline states
+    setupButtons();
+
     // Initialize I2C with custom pins
     Wire.begin(LCD_SDA, LCD_SCL);
+
+    // Auto-detect LCD I2C Address (checks 0x27, 0x3F, or any address on bus)
+    uint8_t detectedAddr = LCD_ADDR;
+    Wire.beginTransmission(LCD_ADDR);
+    if (Wire.endTransmission() != 0) {
+        Serial.printf("[I2C] No device at 0x%02X, scanning bus...\n", LCD_ADDR);
+        for (uint8_t addr = 1; addr < 127; addr++) {
+            Wire.beginTransmission(addr);
+            if (Wire.endTransmission() == 0) {
+                detectedAddr = addr;
+                Serial.printf("[I2C] Found I2C device at 0x%02X!\n", addr);
+                break;
+            }
+        }
+        if (detectedAddr != LCD_ADDR) {
+            lcd = LiquidCrystal_I2C(detectedAddr, LCD_COLS, LCD_ROWS);
+            Serial.printf("[LCD] Auto-switched LCD address to 0x%02X\n", detectedAddr);
+        } else {
+            Serial.println("[LCD] WARNING: No I2C device detected on GPIO 21 (SDA) / GPIO 22 (SCL)!");
+        }
+    } else {
+        Serial.printf("[I2C] LCD confirmed at 0x%02X\n", LCD_ADDR);
+    }
 
     // Initialize LCD
     lcd.init();
@@ -667,11 +1337,14 @@ void setup() {
     pinMode(SOIL_PIN, INPUT);
     pinMode(SOIL_PIN_2, INPUT);
 
-    // Initialize relays (safe OFF state)
-    setupRelays();
-
     // Connect to WiFi
     setupWiFi();
+
+    // Setup NTP Real-Time Clock (WIB / UTC+7)
+    setupNTP();
+
+    // Load Automation Schedules from NVS
+    loadSchedules();
 
     // Setup MQTT
     setupMQTT();
@@ -684,17 +1357,22 @@ void setup() {
     }
 
     // Setup API routes
-    server.on("/",             HTTP_GET,     handleRoot);
-    server.on("/api/status",   HTTP_GET,     handleStatus);
-    server.on("/api/sensors",  HTTP_GET,     handleSensors);
-    server.on("/api/history",  HTTP_GET,     handleHistory);
-    server.on("/api/relay",    HTTP_POST,    handleRelay);
+    server.on("/",              HTTP_GET,     handleRoot);
+    server.on("/api/status",    HTTP_GET,     handleStatus);
+    server.on("/api/sensors",   HTTP_GET,     handleSensors);
+    server.on("/api/history",   HTTP_GET,     handleHistory);
+    server.on("/api/relay",     HTTP_POST,    handleRelay);
+    server.on("/api/time",      HTTP_GET,     handleTime);
+    server.on("/api/schedules", HTTP_GET,     handleGetSchedules);
+    server.on("/api/schedules", HTTP_POST,    handlePostSchedules);
 
     // CORS preflight
-    server.on("/api/status",   HTTP_OPTIONS, handleOptions);
-    server.on("/api/sensors",  HTTP_OPTIONS, handleOptions);
-    server.on("/api/history",  HTTP_OPTIONS, handleOptions);
-    server.on("/api/relay",    HTTP_OPTIONS, handleOptions);
+    server.on("/api/status",    HTTP_OPTIONS, handleOptions);
+    server.on("/api/sensors",   HTTP_OPTIONS, handleOptions);
+    server.on("/api/history",   HTTP_OPTIONS, handleOptions);
+    server.on("/api/relay",     HTTP_OPTIONS, handleOptions);
+    server.on("/api/time",      HTTP_OPTIONS, handleOptions);
+    server.on("/api/schedules", HTTP_OPTIONS, handleOptions);
 
     server.begin();
     Serial.println("HTTP server started on port 80");
@@ -717,6 +1395,15 @@ void loop() {
     if (mqttClient.connected()) {
         mqttClient.loop();
     }
+
+    // Poll physical push-buttons (non-blocking, runs every iteration)
+    pollButtons();
+
+    // Check NTP synchronization status
+    checkNTPStatus();
+
+    // Evaluate automation schedules on minute transitions
+    evaluateSchedules();
 
     unsigned long now = millis();
 
@@ -768,5 +1455,12 @@ void loop() {
             WiFi.disconnect();
             WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
         }
+    }
+
+    // Periodic NTP resync every 1 hour
+    if (WiFi.status() == WL_CONNECTED && (now - lastNTPResync >= NTP_RESYNC_INTERVAL)) {
+        lastNTPResync = now;
+        configTime(NTP_TIMEZONE_OFFSET, NTP_DAYLIGHT_OFFSET, NTP_SERVER_1, NTP_SERVER_2, NTP_SERVER_3);
+        Serial.println("[NTP] Resync triggered");
     }
 }

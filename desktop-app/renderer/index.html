@@ -158,7 +158,7 @@
                     <span class="sensor-status ok" id="status-humidity">Waiting</span>
                 </div>
 
-                <!-- Left Soil Monitor -->
+                <!-- Soil Monitor 1 -->
                 <div class="sensor-card soil" id="card-soil1">
                     <div class="sensor-card-header">
                         <div class="sensor-icon">
@@ -169,7 +169,7 @@
                                 <path d="M12 15a4 4 0 0 0-4-4c0 4 4 4 4 4z"/>
                             </svg>
                         </div>
-                        <span class="sensor-label">Left Soil Monitor</span>
+                        <span class="sensor-label">Soil Monitor 1</span>
                     </div>
                     <div class="sensor-value" id="val-soil1">
                         --<span class="sensor-unit">%</span>
@@ -180,7 +180,7 @@
                     </div>
                 </div>
 
-                <!-- Right Soil Monitor -->
+                <!-- Soil Monitor 2 -->
                 <div class="sensor-card soil" id="card-soil2">
                     <div class="sensor-card-header">
                         <div class="sensor-icon">
@@ -191,7 +191,7 @@
                                 <path d="M12 15a4 4 0 0 0-4-4c0 4 4 4 4 4z"/>
                             </svg>
                         </div>
-                        <span class="sensor-label">Right Soil Monitor</span>
+                        <span class="sensor-label">Soil Monitor 2</span>
                     </div>
                     <div class="sensor-value" id="val-soil2">
                         --<span class="sensor-unit">%</span>
@@ -266,6 +266,52 @@
                             </div>
                         </div>
                     </div>
+                </div>
+            </div>
+
+            <!-- ── Automation & Controls ──────────────────────────── -->
+            <div class="schedules-wrapper" id="schedules-wrapper">
+                <div class="section-header">
+                    <div class="section-title-group">
+                        <h2 class="section-title">
+                            <svg class="section-title-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <circle cx="12" cy="12" r="10"></circle>
+                                <polyline points="12 6 12 12 16 14"></polyline>
+                            </svg>
+                            Automations & Controls
+                        </h2>
+                        <span class="section-subtitle">Automated day/night lighting cycles and device automation</span>
+                    </div>
+                    <div class="schedules-header-actions">
+                        <div class="clock-badge" id="esp-clock-badge" title="ESP32 Real-Time Clock (WIB UTC+7)">
+                            <span class="status-dot online" id="clock-status-dot"></span>
+                            <span class="clock-time mono" id="esp-clock-time">--:--:-- WIB</span>
+                        </div>
+                        <button class="btn btn-primary btn-sm" id="btn-add-schedule">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                                <line x1="12" y1="5" x2="12" y2="19"></line>
+                                <line x1="5" y1="12" x2="19" y2="12"></line>
+                            </svg>
+                            <span>Add Automation</span>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Schedules Grid Container -->
+                <div class="schedules-grid" id="schedules-grid">
+                    <!-- Dynamic schedule cards rendered by app.js -->
+                </div>
+
+                <!-- Empty State for Schedules -->
+                <div class="schedules-empty hidden" id="schedules-empty">
+                    <div class="empty-state-icon" style="margin: 0 auto 10px;">
+                        <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                            <circle cx="12" cy="12" r="10"></circle>
+                            <polyline points="12 6 12 12 16 14"></polyline>
+                        </svg>
+                    </div>
+                    <div class="empty-state-text" style="font-size: 0.95rem;">No automations configured</div>
+                    <div class="empty-state-sub">Click "+ Add Automation" to configure day/night grow light or watering cycles.</div>
                 </div>
             </div>
 
@@ -418,6 +464,126 @@
             </div>
 
         </main>
+    </div>
+
+    <!-- ── Add / Edit Schedule Modal Dialog ────────────────── -->
+    <div class="modal-overlay hidden" id="schedule-modal-overlay">
+        <div class="modal-card" id="schedule-modal-card">
+            <div class="modal-header">
+                <div class="modal-title-group">
+                    <div class="modal-icon">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <circle cx="12" cy="12" r="10"></circle>
+                            <polyline points="12 6 12 12 16 14"></polyline>
+                        </svg>
+                    </div>
+                    <div>
+                        <h3 class="modal-title" id="schedule-modal-title">Edit Automation</h3>
+                        <p class="modal-subtitle">Configure automated timing and target device</p>
+                    </div>
+                </div>
+                <button type="button" class="btn-modal-close" id="btn-close-schedule-modal" title="Close modal">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <line x1="18" y1="6" x2="6" y2="18"></line>
+                        <line x1="6" y1="6" x2="18" y2="18"></line>
+                    </svg>
+                </button>
+            </div>
+
+            <form class="modal-form" id="schedule-form">
+                <input type="hidden" id="sch-id" value="">
+
+                <div class="form-group">
+                    <label for="sch-name" class="form-label">Automation Name</label>
+                    <input
+                        type="text"
+                        id="sch-name"
+                        class="form-input"
+                        placeholder="e.g. Grow Light Night Automation"
+                        required
+                        spellcheck="false"
+                    >
+                </div>
+
+                <div class="form-row-2">
+                    <div class="form-group">
+                        <label for="sch-device" class="form-label">Device to Control</label>
+                        <select id="sch-device" class="form-select">
+                            <option value="growlight">Grow Light (GPIO 14)</option>
+                            <option value="pump">Water Pump (GPIO 27)</option>
+                        </select>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="sch-mode" class="form-label">Cycle Mode</label>
+                        <select id="sch-mode" class="form-select">
+                            <option value="range">Day/Night Range (Turn ON & Turn OFF)</option>
+                            <option value="on_only">Single Action: Turn ON only</option>
+                            <option value="off_only">Single Action: Turn OFF only</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div class="form-row-2" id="sch-times-container">
+                    <div class="form-group" id="sch-on-group">
+                        <label for="sch-on-time" class="form-label" id="sch-on-label">Turn ON Time (Night - WIB)</label>
+                        <input
+                            type="time"
+                            id="sch-on-time"
+                            class="form-input mono"
+                            value="19:00"
+                            required
+                        >
+                    </div>
+
+                    <div class="form-group" id="sch-off-group">
+                        <label for="sch-off-time" class="form-label" id="sch-off-label">Turn OFF Time (Morning - WIB)</label>
+                        <input
+                            type="time"
+                            id="sch-off-time"
+                            class="form-input mono"
+                            value="06:00"
+                        >
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label">Repeat on Days</label>
+                    <div class="days-presets">
+                        <button type="button" class="btn-preset active" data-preset="all">Every Day</button>
+                        <button type="button" class="btn-preset" data-preset="weekdays">Weekdays</button>
+                        <button type="button" class="btn-preset" data-preset="weekends">Weekends</button>
+                    </div>
+                    <div class="days-selector" id="days-selector">
+                        <button type="button" class="day-chip active" data-day="0">Sun</button>
+                        <button type="button" class="day-chip active" data-day="1">Mon</button>
+                        <button type="button" class="day-chip active" data-day="2">Tue</button>
+                        <button type="button" class="day-chip active" data-day="3">Wed</button>
+                        <button type="button" class="day-chip active" data-day="4">Thu</button>
+                        <button type="button" class="day-chip active" data-day="5">Fri</button>
+                        <button type="button" class="day-chip active" data-day="6">Sat</button>
+                    </div>
+                </div>
+
+                <div class="form-group form-toggle-group">
+                    <label class="toggle-switch-label">
+                        <input type="checkbox" id="sch-enabled" checked>
+                        <span class="toggle-slider"></span>
+                        <span class="toggle-text">Enable automated cycle</span>
+                    </label>
+                </div>
+
+                <div class="modal-actions">
+                    <button type="button" class="btn btn-secondary" id="btn-cancel-schedule">Cancel</button>
+                    <button type="submit" class="btn btn-primary" id="btn-save-schedule">
+                        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                            <polyline points="20 6 9 17 4 12"></polyline>
+                        </svg>
+                        <span>Save Automation</span>
+                    </button>
+                </div>
+            </form>
+        </div>
     </div>
 
     <!-- Toast container -->

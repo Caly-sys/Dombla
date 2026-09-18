@@ -5,6 +5,7 @@ package-lock.json
 # Build outputs
 dist/
 out/
+esp32-firmware/Dombla/build/
 
 # OS files
 .DS_Store
@@ -28,5 +29,9 @@ desktop.ini
 
 # Secrets (NEVER commit these)
 esp32-firmware/src/secrets.h
+esp32-firmware/Dombla/secrets.h
 web-dashboard/.env
 .env
+
+# Local tools and binaries
+hivemq/
