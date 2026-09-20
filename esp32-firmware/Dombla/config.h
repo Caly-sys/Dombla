@@ -14,27 +14,27 @@
 
 // --- MQTT Settings ---
 // Device ID used in MQTT topics: dombla/<MQTT_DEVICE_ID>/sensors/...
-#define MQTT_DEVICE_ID       "greenhouse1"
-#define MQTT_PUBLISH_INTERVAL 10000   // Publish sensor data every 10 seconds
-#define MQTT_RECONNECT_INTERVAL 5000  // Wait 5s between reconnect attempts
+#define MQTT_DEVICE_ID "greenhouse1"
+#define MQTT_PUBLISH_INTERVAL 10000  // Publish sensor data every 10 seconds
+#define MQTT_RECONNECT_INTERVAL 5000 // Wait 5s between reconnect attempts
 #ifdef MQTT_KEEPALIVE
 #undef MQTT_KEEPALIVE
 #endif
-#define MQTT_KEEPALIVE       60       // MQTT keepalive in seconds
+#define MQTT_KEEPALIVE 60 // MQTT keepalive in seconds
 
 // --- NTP Clock & Timezone (WIB / UTC+7 Asia/Jakarta) ---
-#define NTP_SERVER_1        "pool.ntp.org"
-#define NTP_SERVER_2        "time.google.com"
-#define NTP_SERVER_3        "time.nist.gov"
-#define NTP_TIMEZONE_OFFSET (7 * 3600)  // UTC+7 hours in seconds (WIB)
-#define NTP_DAYLIGHT_OFFSET 0           // No daylight saving time
-#define NTP_TZ_POSIX        "WIB-7"     // Standard POSIX timezone string for UTC+7
+#define NTP_SERVER_1 "pool.ntp.org"
+#define NTP_SERVER_2 "time.google.com"
+#define NTP_SERVER_3 "time.nist.gov"
+#define NTP_TIMEZONE_OFFSET (7 * 3600) // UTC+7 hours in seconds (WIB)
+#define NTP_DAYLIGHT_OFFSET 0          // No daylight saving time
+#define NTP_TZ_POSIX "WIB-7" // Standard POSIX timezone string for UTC+7
 #define NTP_RESYNC_INTERVAL (3600 * 1000) // Resync every 1 hour
 
 // --- Automation Schedules ---
-#define MAX_SCHEDULES           16
+#define MAX_SCHEDULES 16
 #define SCHEDULES_NVS_NAMESPACE "dombla_sch"
-#define SCHEDULES_NVS_KEY       "rules"
+#define SCHEDULES_NVS_KEY "rules"
 
 // --- Pin Definitions ---
 // 🌡️ DHT11 Temperature & Humidity Sensor
@@ -42,21 +42,22 @@
 #define DHT_TYPE DHT11
 
 // 🌱 Soil Moisture Sensors (Analog)
-#define SOIL_PIN   34   // Soil sensor 1 — GPIO 34 (ADC1_CH6)
-#define SOIL_PIN_2 35   // Soil sensor 2 — GPIO 35 (ADC1_CH7)
+#define SOIL_PIN 34   // Soil sensor 1 — GPIO 34 (ADC1_CH6)
+#define SOIL_PIN_2 35 // Soil sensor 2 — GPIO 35 (ADC1_CH7)
 
 // 🔌 Relay Outputs
-#define RELAY_GROWLIGHT_PIN 14  // GPIO 14 — Grow Light relay
-#define RELAY_PUMP_PIN      27  // GPIO 27 — Water Pump relay
-#define RELAY_ACTIVE_LOW    true // Most relay modules trigger on LOW
-#define RELAY_PUMP_DEFAULT_ON      false // Water pump OFF at boot
-#define RELAY_GROWLIGHT_DEFAULT_ON true  // Grow light ON at boot
+#define RELAY_GROWLIGHT_PIN 14          // GPIO 14 — Grow Light relay
+#define RELAY_PUMP_PIN 27               // GPIO 27 — Water Pump relay
+#define RELAY_ACTIVE_LOW true           // Most relay modules trigger on LOW
+#define RELAY_PUMP_DEFAULT_ON false     // Water pump OFF at boot
+#define RELAY_GROWLIGHT_DEFAULT_ON true // Grow light ON at boot
 
 // 🔘 Physical Push-Button Inputs (3-pin modules: VCC→3.3V, GND→GND, OUT→GPIO)
-#define BTN_PUMP_PIN        25  // GPIO 25 — Water Pump toggle button
-#define BTN_GROWLIGHT_PIN   26  // GPIO 26 — Grow Light toggle button
-#define BTN_DEBOUNCE_MS     40  // Debounce window in milliseconds
-#define BTN_BOOT_LOCKOUT_MS 1000 // Ignore button transitions during first 1s after boot
+#define BTN_PUMP_PIN 25      // GPIO 25 — Water Pump toggle button
+#define BTN_GROWLIGHT_PIN 26 // GPIO 26 — Grow Light toggle button
+#define BTN_DEBOUNCE_MS 40   // Debounce window in milliseconds
+#define BTN_BOOT_LOCKOUT_MS                                                    \
+  1000 // Ignore button transitions during first 1s after boot
 
 // 📺 LCD I2C (16x2)
 #define LCD_ADDR 0x27 // Common I2C address; try 0x3F if not working

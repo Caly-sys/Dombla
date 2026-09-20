@@ -11,6 +11,33 @@ const crypto = require('crypto');
 const express = require('express');
 const WebSocket = require('ws');
 const mqtt = require('mqtt');
+const { Aedes } = require('aedes');
+const net = require('net');
+
+// ── Local MQTT Broker Setup (Aedes) ──────────────────────────
+const MQTT_BROKER_PORT = 1883;
+
+let aedes = null;
+Aedes.createBroker().then((broker) => {
+    aedes = broker;
+    const mqttServer = net.createServer(aedes.handle);
+
+    mqttServer.listen(MQTT_BROKER_PORT, function () {
+        console.log(`[MQTT Broker] Local Aedes broker started on port ${MQTT_BROKER_PORT}`);
+    });
+
+    aedes.on('client', function (client) {
+        console.log(`[MQTT Broker] Client Connected: ${client ? client.id : client} from ${client.req ? client.req.connection.remoteAddress : 'unknown'}`);
+    });
+
+    aedes.on('clientDisconnect', function (client) {
+        console.log(`[MQTT Broker] Client Disconnected: ${client ? client.id : client}`);
+    });
+
+    aedes.on('clientError', function (client, err) {
+        console.log(`[MQTT Broker] Client Error: ${client ? client.id : client} - ${err.message}`);
+    });
+});
 
 const PORT = parseInt(process.env.PORT, 10) || 8000;
 const MQTT_BROKER = process.env.MQTT_BROKER || '';
@@ -34,12 +61,8 @@ function isValidToken(token) {
     return activeTokens.has(token);
 }
 
-const isConfigured = Boolean(
-    MQTT_BROKER &&
-    !MQTT_BROKER.includes('YOUR_CLUSTER') &&
-    MQTT_USER &&
-    !MQTT_USER.includes('YOUR_MQTT_USERNAME')
-);
+// Always true since we run locally now
+const isConfigured = true;
 
 // ── Express Setup ────────────────────────────────────────────
 const app = express();
@@ -113,20 +136,18 @@ function broadcast(data) {
 let mqttClient = null;
 
 if (isConfigured) {
-    console.log(`[MQTT] Connecting to broker: ${MQTT_BROKER}...`);
+    console.log(`[MQTT] Connecting to local broker on port ${MQTT_BROKER_PORT}...`);
 
-    mqttClient = mqtt.connect(MQTT_BROKER, {
-        username: MQTT_USER,
-        password: MQTT_PASSWORD,
+    mqttClient = mqtt.connect(`mqtt://127.0.0.1:${MQTT_BROKER_PORT}`, {
         clientId: `dombla-web-bridge-${Math.random().toString(16).substring(2, 8)}`,
         clean: true,
         reconnectPeriod: 5000,
         connectTimeout: 30000,
-        rejectUnauthorized: true // Secure TLS verification
+        rejectUnauthorized: false
     });
 
     mqttClient.on('connect', () => {
-        console.log('[MQTT] Connected successfully to HiveMQ Cloud');
+        console.log('[MQTT] Connected successfully to local broker');
 
         // Subscribe to all Dombla device sensor, status, pump, and schedule topics
         const topics = [
@@ -360,14 +381,11 @@ wss.on('connection', (ws, req) => {
 // ── Start Server ─────────────────────────────────────────────
 server.listen(PORT, () => {
     console.log('====================================================');
-    console.log('  Dombla Web Dashboard & MQTT Bridge');
+    console.log('  Dombla Web Dashboard & Local MQTT Bridge');
     console.log('====================================================');
     console.log(`  Local URL:      http://localhost:${PORT}`);
     console.log(`  WebSocket URL:  ws://localhost:${PORT}/ws`);
-    console.log(`  MQTT Remote:    ${isConfigured ? 'Enabled' : 'Disabled (fill in .env)'}`);
-    if (isConfigured) {
-        console.log(`  MQTT Broker:    ${MQTT_BROKER}`);
-        console.log(`  Target Device:  ${MQTT_DEVICE_ID}`);
-    }
+    console.log(`  MQTT Broker:    mqtt://127.0.0.1:${MQTT_BROKER_PORT} (Local)`);
+    console.log(`  Target Device:  ${MQTT_DEVICE_ID}`);
     console.log('====================================================');
 });
