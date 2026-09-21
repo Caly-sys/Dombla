@@ -139,6 +139,18 @@
         infoTempRange:   $('info-temp-range'),
         infoHumMin:      $('info-hum-min'),
         infoSoilRange:   $('info-soil-range'),
+        infoAutoWater:   $('info-auto-water'),
+        relayAutoWaterPill: $('relay-auto-water-pill'),
+
+        // Diagnostics
+        diagWrapper:        $('diagnostics-wrapper'),
+        diagOverallStatus:  $('diag-overall-status'),
+        diagStatusText:     $('diag-status-text'),
+        diagFaultCount:     $('diag-fault-count'),
+        diagActiveFault:    $('diag-active-fault'),
+        diagDhtStatus:      $('diag-dht-status'),
+        diagWateringResult: $('diag-watering-result'),
+        diagEventLog:       $('diag-event-log')
     };
 
     // ── Authentication Management ────────────────────────────
@@ -310,6 +322,7 @@
             updateSensorCards(state.mqtt.lastData);
             updateRelayStates(state.mqtt.lastData);
             updateInfoPanel(state.mqtt.lastData);
+            updateDiagnostics(state.mqtt.lastData);
         }
         renderSchedules();
         updateClockUI();
@@ -404,6 +417,7 @@
             updateSensorCards(data);
             updateInfoPanel(data);
             updateAlerts(data);
+            updateDiagnostics(data);
             updateRelayStates(data);
             if (data.time) {
                 updateClockState(data.time);
@@ -572,6 +586,61 @@
         dom.infoSoilRange.textContent = (th.soil_dry != null && th.soil_wet != null)
             ? `${th.soil_dry}% – ${th.soil_wet}%`
             : '—';
+        dom.infoAutoWater.textContent = (th.auto_water != null && th.auto_water_duration != null)
+            ? `${th.auto_water}% for ${th.auto_water_duration/1000}s`
+            : '—';
+    }
+
+    function updateDiagnostics(data) {
+        if (!dom.diagWrapper) return;
+        const diag = data.diagnostics;
+        if (!diag) {
+            dom.diagWrapper.style.display = 'none';
+            return;
+        }
+        
+        dom.diagWrapper.style.display = 'block';
+        
+        // Overall Status
+        let statusText = '🟢 System Normal';
+        let dotClass = 'online';
+        if (diag.severity === 1) {
+            statusText = '🟡 Attention Required';
+            dotClass = 'warning';
+        } else if (diag.severity === 2) {
+            statusText = '🔴 System Error';
+            dotClass = 'error';
+        }
+        
+        dom.diagStatusText.textContent = statusText;
+        dom.diagOverallStatus.querySelector('.status-dot').className = `status-dot ${dotClass}`;
+        
+        dom.diagFaultCount.textContent = `${diag.fault_count || 0} active faults`;
+        
+        // Details
+        dom.diagActiveFault.textContent = diag.active_fault || 'None';
+        dom.diagDhtStatus.textContent = diag.dht_failed ? 'Failed' : 'OK';
+        if (diag.dht_failed) {
+            dom.diagDhtStatus.style.color = '#f23f43';
+        } else {
+            dom.diagDhtStatus.style.color = 'var(--text-main)';
+        }
+        dom.diagWateringResult.textContent = diag.last_watering_result || 'None';
+        
+        // Event Log
+        dom.diagEventLog.innerHTML = '';
+        const logs = diag.event_log || [];
+        if (logs.length === 0) {
+            dom.diagEventLog.innerHTML = '<div style="opacity:0.5; font-style:italic;">No recent events</div>';
+        } else {
+            // Display newest first
+            [...logs].reverse().forEach(event => {
+                const item = document.createElement('div');
+                item.className = 'diag-event-item';
+                item.textContent = event;
+                dom.diagEventLog.appendChild(item);
+            });
+        }
     }
 
     function updateAlerts(data) {
@@ -638,9 +707,11 @@
         });
 
         ['infoIp', 'infoMac', 'infoRssi', 'infoName', 'infoUptime', 'infoHeap',
-         'infoTempRange', 'infoHumMin', 'infoSoilRange'].forEach(key => {
-            dom[key].textContent = '—';
+         'infoTempRange', 'infoHumMin', 'infoSoilRange', 'infoAutoWater'].forEach(key => {
+            if (dom[key]) dom[key].textContent = '—';
         });
+        
+        if (dom.relayAutoWaterPill) dom.relayAutoWaterPill.style.display = 'none';
     }
 
     // ── Charts (Discord Dark Palette) ───────────────────────
@@ -1050,6 +1121,11 @@
             state.relays.pump = relays.pump;
             updateRelayUI('pump', relays.pump);
         }
+        if (data.auto_watering_active !== undefined && dom.relayAutoWaterPill) {
+            dom.relayAutoWaterPill.style.display = data.auto_watering_active ? 'inline-block' : 'none';
+        } else if (data.auto_watering_active === undefined && dom.relayAutoWaterPill) {
+            dom.relayAutoWaterPill.style.display = 'none';
+        }
     }
 
     // ── MQTT WebSocket Client & Handling ────────────────────
@@ -1153,6 +1229,9 @@
             if (cachedDev.sensors.humidity !== undefined) d.sensors.dht11.humidity = cachedDev.sensors.humidity;
             if (cachedDev.sensors.soil1 !== undefined) d.sensors.soil1.moisture = cachedDev.sensors.soil1;
             if (cachedDev.sensors.soil2 !== undefined) d.sensors.soil2.moisture = cachedDev.sensors.soil2;
+            if (cachedDev.sensors.auto_watering_active !== undefined) {
+                d.auto_watering_active = cachedDev.sensors.auto_watering_active === 'true' || cachedDev.sensors.auto_watering_active === true;
+            }
         }
         if (cachedDev.pump !== undefined) {
             d.relays.pump = cachedDev.pump;
@@ -1211,6 +1290,10 @@
                     if (subType === 'humidity') d.sensors.dht11.humidity = isNaN(val) ? payload : val;
                     if (subType === 'soil1') d.sensors.soil1.moisture = isNaN(val) ? payload : val;
                     if (subType === 'soil2') d.sensors.soil2.moisture = isNaN(val) ? payload : val;
+                    if (subType === 'auto_watering_active') {
+                        d.auto_watering_active = payload === 'true';
+                        updateRelayStates(d);
+                    }
 
                     // Push to live charts
                     addLiveChartPoint(d.sensors.dht11.temperature, d.sensors.dht11.humidity, d.sensors.soil1.moisture);
@@ -1244,6 +1327,13 @@
                 const isOnline = payload.toLowerCase() === 'online';
                 state.mqtt.connected = isOnline;
                 updateMQTTStatusUI();
+            } else if (topicType === 'diagnostics' && subType) {
+                if (!d.diagnostics) d.diagnostics = {};
+                if (subType === 'severity') d.diagnostics.severity = parseInt(payload, 10);
+                if (subType === 'active_fault') d.diagnostics.active_fault = payload;
+                if (subType === 'fault_count') d.diagnostics.fault_count = parseInt(payload, 10);
+                if (subType === 'dht_failed') d.diagnostics.dht_failed = (payload === 'true');
+                if (subType === 'last_watering_result') d.diagnostics.last_watering_result = payload;
             }
         }
 

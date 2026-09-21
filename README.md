@@ -53,9 +53,10 @@ Dombla is a plant monitoring and greenhouse automation system built on the ESP32
 - **🌱 Dual Soil Moisture Sensors** — Two independent analog capacitive/resistive soil channels (Left: GPIO 34, Right: GPIO 35).
 - **💧 Actuator & Relay Controls** — Remote and local control for water pumps (GPIO 27) and grow lights (GPIO 14).
 - **📺 16x2 I2C LCD Display** — Automatic 4-page cycling display showing Climate, Soil, IP Address, and MQTT connection status.
+- **🚨 Fault Detection & Diagnostics** — Built-in failsafes for maximum pump runtime, sensor jump detection, and automated watering effectiveness verification.
 - **☁️ HiveMQ Cloud Integration** — Secure TLS connection with MQTT Last Will and Testament (LWT) for online/offline presence detection.
 - **🖥️ Dual Client Interfaces**:
-  - **Web Dashboard** with real-time Chart.js graphs, relay toggles, and multi-device switcher.
+  - **Web Dashboard** with real-time Chart.js graphs, relay toggles, multi-device switcher, and a dedicated **System Health & Diagnostics** pane.
   - **Desktop App** built with Electron, featuring Discord dark mode styling.
 - **🛡️ Security First** — Wi-Fi and MQTT credentials stored exclusively in gitignored `secrets.h` and `.env` files.
 
@@ -165,6 +166,9 @@ All MQTT messages use QoS 1 with clean topic separation:
 | `dombla/<device>/pump/set` | Client → ESP32 | `ON` / `OFF` | Control command for water pump |
 | `dombla/<device>/growlight/state` | ESP32 → Broker | `ON` / `OFF` | Confirmed grow light state |
 | `dombla/<device>/growlight/set` | Client → ESP32 | `ON` / `OFF` | Control command for grow light |
+| `dombla/<device>/diagnostics/severity` | ESP32 → Broker | `0`, `1`, or `2` | Overall health severity (0=Normal, 2=Error) |
+| `dombla/<device>/diagnostics/active_fault` | ESP32 → Broker | `String` | Current active fault message |
+| `dombla/<device>/diagnostics/fault_count` | ESP32 → Broker | `2` | Number of active faults |
 
 *Default device identifier is `greenhouse1` (configurable in `config.h` and `.env`).*
 
@@ -177,7 +181,7 @@ When connected to the same local Wi-Fi network, the ESP32 serves a direct REST A
 | Endpoint | Method | Description |
 | :--- | :--- | :--- |
 | `/` | GET | Mini HTML status diagnostics page |
-| `/api/status` | GET | Comprehensive JSON status, sensor telemetry, alerts, and relay states |
+| `/api/status` | GET | Comprehensive JSON status, sensor telemetry, alerts, diagnostic details, and relay states |
 | `/api/sensors` | GET | Current sensor readings only |
 | `/api/history` | GET | 60-point rolling history buffer (~1 hour at 1 reading/min) |
 | `/api/relay` | POST / GET | Toggle actuators: `/api/relay?relay=pump&state=1` |
@@ -230,6 +234,14 @@ Thresholds for automatic visual alerts:
 #define HUMIDITY_LOW_THRESHOLD 30.0 // % — low air humidity
 #define SOIL_DRY_THRESHOLD  25.0    // % — water needed
 #define SOIL_WET_THRESHOLD  85.0    // % — potential overwatering
+```
+
+Thresholds for Fault Detection mechanisms:
+```cpp
+#define SOIL_JUMP_THRESHOLD 15.0                // Maximum valid % change per second
+#define SOIL_SENSOR_DISAGREEMENT_THRESHOLD 30.0 // Maximum % difference between L and R
+#define PUMP_MAX_RUNTIME_MS 15000               // 15s absolute limit for pump activity
+#define WATERING_EFFECTIVENESS_THRESHOLD 3.0    // % moisture must increase after watering
 ```
 
 ---

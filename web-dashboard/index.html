@@ -88,6 +88,48 @@
                 <!-- Alerts rendered by JS -->
             </div>
 
+            <!-- System Diagnostics -->
+            <div class="diagnostics-wrapper" id="diagnostics-wrapper">
+                <div class="section-header">
+                    <h2 class="section-title">
+                        <svg class="section-title-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M22 12h-4l-3 9L9 3l-3 9H2"></path>
+                        </svg>
+                        System Health & Diagnostics
+                    </h2>
+                </div>
+                <div class="diagnostics-card">
+                    <div class="diag-header">
+                        <div class="diag-status" id="diag-overall-status">
+                            <span class="status-dot online"></span>
+                            <span id="diag-status-text">🟢 System Normal</span>
+                        </div>
+                        <div class="diag-fault-count" id="diag-fault-count">0 active faults</div>
+                    </div>
+                    <div class="diag-details">
+                        <div class="diag-detail-row">
+                            <span class="diag-label">Active Fault</span>
+                            <span class="diag-value" id="diag-active-fault">None</span>
+                        </div>
+                        <div class="diag-detail-row">
+                            <span class="diag-label">DHT11 Status</span>
+                            <span class="diag-value" id="diag-dht-status">OK</span>
+                        </div>
+                        <div class="diag-detail-row">
+                            <span class="diag-label">Last Watering Result</span>
+                            <span class="diag-value" id="diag-watering-result">None</span>
+                        </div>
+                    </div>
+                    
+                    <div class="diag-event-log-container">
+                        <div class="diag-log-title">Recent Events</div>
+                        <div class="diag-event-log" id="diag-event-log">
+                            <!-- Events populated by JS -->
+                        </div>
+                    </div>
+                </div>
+            </div>
+
             <!-- Sensor Cards -->
             <div class="section-header">
                 <h1 class="section-title">
@@ -231,7 +273,9 @@
                                     <span class="relay-title">Water Pump</span>
                                     <span class="relay-state-pill" id="relay-state-pump">OFF</span>
                                 </div>
-
+                                <div class="relay-badge-row" style="margin-top: 4px;">
+                                    <span class="relay-state-pill" id="relay-auto-water-pill" style="display: none; background: #0cce6b; color: #16213e; font-size: 0.65rem;">AUTO WATERING: ON</span>
+                                </div>
                             </div>
                             <div class="relay-actions">
                                 <button class="btn btn-discord-toggle" id="btn-relay-pump">
@@ -419,6 +463,10 @@
                     <div class="info-row">
                         <span class="info-label">Soil Range</span>
                         <span class="info-value" id="info-soil-range">—</span>
+                    </div>
+                    <div class="info-row">
+                        <span class="info-label">Auto Water</span>
+                        <span class="info-value" id="info-auto-water">—</span>
                     </div>
                 </div>
             </div>

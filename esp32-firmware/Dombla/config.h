@@ -83,6 +83,21 @@
 #define SOIL_DRY_THRESHOLD 25.0     // % — soil needs water
 #define SOIL_WET_THRESHOLD 85.0     // % — overwatered
 
+// --- Auto Watering System ---
+#define AUTO_WATER_THRESHOLD 20.0     // % — auto start pump if below this
+#define AUTO_WATER_DURATION_MS 3000   // ms — 3 seconds pump on-time
+#define AUTO_WATER_COOLDOWN_MS 60000  // ms — 60 seconds lockout before next check
+
+// --- Fault Detection & Diagnostics ---
+#define SOIL_MIN_VALID 0.0
+#define SOIL_MAX_VALID 100.0
+#define SOIL_JUMP_THRESHOLD 20.0             // % — sudden unrealistic change
+#define SOIL_SENSOR_DISAGREEMENT_THRESHOLD 20.0 // % — max difference between sensor 1 & 2
+#define WATERING_RECHECK_DELAY_MS 30000      // Wait 30s after watering to check effectiveness
+#define WATERING_EFFECTIVENESS_THRESHOLD 3.0 // Expect at least 3% moisture increase
+#define DHT_MAX_VALID_AGE_MS 10000           // Treat DHT as failed if no valid read in 10s
+#define PUMP_MAX_RUNTIME_MS 15000            // Failsafe: max pump on time (15s)
+
 // --- History Buffer ---
 #define HISTORY_SIZE 60 // Store last 60 readings (~1 hour at 1/min)
 

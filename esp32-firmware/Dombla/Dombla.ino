@@ -76,6 +76,55 @@ int soilRaw2 = 0;
 bool pumpState = RELAY_PUMP_DEFAULT_ON;           // false (OFF at boot)
 bool growlightState = RELAY_GROWLIGHT_DEFAULT_ON; // true (ON at boot)
 
+// Auto watering state
+bool autoWateringActive = false;
+unsigned long autoWateringStartTime = 0;
+unsigned long lastAutoWateringTime = 0;
+bool checkingWateringEffectiveness = false;
+float preWateringMoisture = 0.0;
+unsigned long wateringEffectivenessCheckTime = 0;
+
+// Fault Detection State
+enum FaultSeverity { NORMAL = 0, WARNING = 1, ERROR = 2 };
+FaultSeverity systemSeverity = NORMAL;
+String activeFault = "";
+float lastValidSoil1 = -1;
+float lastValidSoil2 = -1;
+unsigned long lastValidDHTTime = 0;
+bool dhtFailed = false;
+unsigned long lastPumpStart = 0;
+String lastWateringResult = "None";
+int faultCount = 0;
+String systemEventLog[10];
+int eventLogIndex = 0;
+
+void logEvent(String event) {
+  String timestamp = "";
+  struct tm timeinfo;
+  if (getLocalTime(&timeinfo, 0) && timeinfo.tm_year >= (2025 - 1900)) {
+    char buf[12];
+    snprintf(buf, sizeof(buf), "%02d:%02d:%02d ", timeinfo.tm_hour, timeinfo.tm_min, timeinfo.tm_sec);
+    timestamp = String(buf);
+  }
+  systemEventLog[eventLogIndex] = timestamp + event;
+  eventLogIndex = (eventLogIndex + 1) % 10;
+  Serial.println("[Event] " + event);
+}
+
+void setFault(FaultSeverity severity, String message) {
+  if (activeFault != message || systemSeverity != severity) {
+    systemSeverity = severity;
+    activeFault = message;
+    if (severity != NORMAL) {
+      faultCount++;
+      logEvent(message);
+    } else {
+      logEvent("System Recovered");
+    }
+  }
+}
+
+
 // LCD page cycling
 int lcdPage = 0;
 const int LCD_PAGES = 5; // Added Time & Schedules status page
@@ -201,12 +250,57 @@ void setupRelays() {
 
 void setPump(bool on) {
   pumpState = on;
+  if (on) {
+    lastPumpStart = millis();
+  } else {
+    autoWateringActive = false; // Cancel auto-watering if pump turned off
+  }
   if (RELAY_ACTIVE_LOW) {
     digitalWrite(RELAY_PUMP_PIN, on ? LOW : HIGH);
   } else {
     digitalWrite(RELAY_PUMP_PIN, on ? HIGH : LOW);
   }
   Serial.printf("[Relay] Pump %s\n", on ? "ON" : "OFF");
+}
+
+void evaluateAutoWatering() {
+  unsigned long now = millis();
+  
+  if (!autoWateringActive) {
+    // Check if we need to start watering
+    // Wait for cooldown to expire
+    if (now - lastAutoWateringTime >= AUTO_WATER_COOLDOWN_MS || lastAutoWateringTime == 0) {
+      if (soilMoisture < AUTO_WATER_THRESHOLD || soilMoisture2 < AUTO_WATER_THRESHOLD) {
+        Serial.println("[AutoWater] Soil moisture low. Starting automatic watering!");
+        autoWateringActive = true;
+        autoWateringStartTime = now;
+        preWateringMoisture = soilMoisture; // Track for effectiveness
+        checkingWateringEffectiveness = false; // Reset checking state
+        
+        setPump(true); // this handles physical pin and prints to serial
+        if (mqttClient.connected()) {
+          String topic = String("dombla/") + MQTT_DEVICE_ID + "/pump/state";
+          mqttClient.publish(topic.c_str(), "ON", true);
+        }
+      }
+    }
+  } else {
+    // We are currently watering, check if it's time to stop
+    if (now - autoWateringStartTime >= AUTO_WATER_DURATION_MS) {
+      Serial.println("[AutoWater] Watering duration reached. Stopping pump.");
+      setPump(false);
+      lastAutoWateringTime = now;
+      
+      // Begin effectiveness check timer
+      checkingWateringEffectiveness = true;
+      wateringEffectivenessCheckTime = now;
+      
+      if (mqttClient.connected()) {
+        String topic = String("dombla/") + MQTT_DEVICE_ID + "/pump/state";
+        mqttClient.publish(topic.c_str(), "OFF", true);
+      }
+    }
+  }
 }
 
 void setGrowlight(bool on) {
@@ -310,15 +404,40 @@ void readDHT() {
   if (!isnan(t) && !isnan(h)) {
     temperature = t;
     humidity = h;
+    lastValidDHTTime = millis();
+    if (dhtFailed) {
+      setFault(NORMAL, "DHT11 Sensor Recovered");
+      dhtFailed = false;
+    }
   }
 }
 
 void readSoilSensors() {
   soilRaw = analogRead(SOIL_PIN);
-  soilMoisture = mapSoilMoisture(soilRaw);
+  float newSoil = mapSoilMoisture(soilRaw);
+  
+  if (newSoil >= SOIL_MIN_VALID && newSoil <= SOIL_MAX_VALID) {
+    if (lastValidSoil1 >= 0 && abs(newSoil - lastValidSoil1) >= SOIL_JUMP_THRESHOLD) {
+      setFault(WARNING, "Soil Sensor 1 Unstable Jump");
+    }
+    soilMoisture = newSoil;
+    lastValidSoil1 = newSoil;
+  } else {
+    setFault(ERROR, "Soil Sensor 1 Invalid Reading");
+  }
 
   soilRaw2 = analogRead(SOIL_PIN_2);
-  soilMoisture2 = mapSoilMoisture(soilRaw2);
+  float newSoil2 = mapSoilMoisture(soilRaw2);
+
+  if (newSoil2 >= SOIL_MIN_VALID && newSoil2 <= SOIL_MAX_VALID) {
+    if (lastValidSoil2 >= 0 && abs(newSoil2 - lastValidSoil2) >= SOIL_JUMP_THRESHOLD) {
+      setFault(WARNING, "Soil Sensor 2 Unstable Jump");
+    }
+    soilMoisture2 = newSoil2;
+    lastValidSoil2 = newSoil2;
+  } else {
+    setFault(ERROR, "Soil Sensor 2 Invalid Reading");
+  }
 }
 
 void recordHistory() {
@@ -828,6 +947,25 @@ void handleStatus() {
   thresholds["humidity_low"] = HUMIDITY_LOW_THRESHOLD;
   thresholds["soil_dry"] = SOIL_DRY_THRESHOLD;
   thresholds["soil_wet"] = SOIL_WET_THRESHOLD;
+  thresholds["auto_water"] = AUTO_WATER_THRESHOLD;
+  thresholds["auto_water_duration"] = AUTO_WATER_DURATION_MS;
+
+  doc["auto_watering_active"] = autoWateringActive;
+
+  // Diagnostics
+  JsonObject diagnostics = doc["diagnostics"].to<JsonObject>();
+  diagnostics["severity"] = (int)systemSeverity;
+  diagnostics["active_fault"] = activeFault;
+  diagnostics["fault_count"] = faultCount;
+  diagnostics["dht_failed"] = dhtFailed;
+  diagnostics["last_watering_result"] = lastWateringResult;
+  JsonArray eventLog = diagnostics["event_log"].to<JsonArray>();
+  for (int i = 0; i < 10; i++) {
+    int idx = (eventLogIndex + i) % 10;
+    if (systemEventLog[idx].length() > 0) {
+      eventLog.add(systemEventLog[idx]);
+    }
+  }
 
   String alertStr = getAlerts();
   if (alertStr.length() > 0) {
@@ -864,6 +1002,7 @@ void handleSensors() {
   doc["soil2_raw"] = soilRaw2;
   doc["pump"] = pumpState;
   doc["growlight"] = growlightState;
+  doc["auto_watering_active"] = autoWateringActive;
   doc["timestamp"] = millis();
 
   String output;
@@ -1346,10 +1485,20 @@ void mqttPublishSensors() {
                      String(soilMoisture, 1).c_str(), true);
   mqttClient.publish((prefix + "soil2").c_str(),
                      String(soilMoisture2, 1).c_str(), true);
+  mqttClient.publish((prefix + "auto_watering_active").c_str(),
+                     autoWateringActive ? "true" : "false", true);
   mqttClient.publish((prefix + "time").c_str(), getCurrentTimeString().c_str(),
                      true);
 
-  Serial.println("[MQTT] Sensors published");
+  // Publish Diagnostics
+  String diagPrefix = String("dombla/") + MQTT_DEVICE_ID + "/diagnostics/";
+  mqttClient.publish((diagPrefix + "severity").c_str(), String((int)systemSeverity).c_str(), true);
+  mqttClient.publish((diagPrefix + "active_fault").c_str(), activeFault.c_str(), true);
+  mqttClient.publish((diagPrefix + "fault_count").c_str(), String(faultCount).c_str(), true);
+  mqttClient.publish((diagPrefix + "dht_failed").c_str(), dhtFailed ? "true" : "false", true);
+  mqttClient.publish((diagPrefix + "last_watering_result").c_str(), lastWateringResult.c_str(), true);
+
+  Serial.println("[MQTT] Sensors & Diagnostics published");
 }
 
 // ── WiFi Setup ──────────────────────────────────────────────
@@ -1393,6 +1542,44 @@ void setupWiFi() {
     lcd.setCursor(0, 1);
     lcd.print("Check secrets.h");
     delay(3000);
+  }
+}
+
+// ── Fault Evaluation ────────────────────────────────────────
+
+void evaluateFaults() {
+  unsigned long now = millis();
+
+  // DHT failure detection
+  if (!dhtFailed && (now - lastValidDHTTime > DHT_MAX_VALID_AGE_MS)) {
+    dhtFailed = true;
+    setFault(ERROR, "DHT11 Data Unavailable");
+  }
+
+  // Soil Sensor Disagreement
+  if (lastValidSoil1 >= 0 && lastValidSoil2 >= 0) {
+    if (abs(lastValidSoil1 - lastValidSoil2) > SOIL_SENSOR_DISAGREEMENT_THRESHOLD) {
+      setFault(WARNING, "Soil Sensors Disagree");
+    }
+  }
+
+  // Pump Safety
+  if (pumpState && (now - lastPumpStart > PUMP_MAX_RUNTIME_MS)) {
+    setFault(ERROR, "Pump Max Runtime Exceeded - Safety Stop");
+    setPump(false);
+  }
+
+  // Watering Effectiveness
+  if (checkingWateringEffectiveness && (now - wateringEffectivenessCheckTime > WATERING_RECHECK_DELAY_MS)) {
+    checkingWateringEffectiveness = false;
+    float currentMoisture = soilMoisture; // Using primary sensor
+    if (currentMoisture - preWateringMoisture < WATERING_EFFECTIVENESS_THRESHOLD) {
+      lastWateringResult = String(preWateringMoisture, 1) + "% -> " + String(currentMoisture, 1) + "% (Failed)";
+      setFault(WARNING, "Possible Watering Problem");
+    } else {
+      lastWateringResult = String(preWateringMoisture, 1) + "% -> " + String(currentMoisture, 1) + "% (Success)";
+      logEvent("Watering Successful");
+    }
   }
 }
 
@@ -1529,6 +1716,12 @@ void loop() {
 
   // Evaluate automation schedules on minute transitions
   evaluateSchedules();
+
+  // Evaluate automatic watering based on non-blocking timers and moisture
+  evaluateAutoWatering();
+
+  // Evaluate system faults and safety
+  evaluateFaults();
 
   unsigned long now = millis();
 
