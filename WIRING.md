@@ -63,6 +63,7 @@ Press a button once to toggle its relay ON/OFF. The firmware debounces the signa
 - **Pump Safety**: Add a flyback diode (e.g., 1N4007) across the pump motor terminals to protect the relay from back-EMF spikes.
 - **Push-Button Modules**: The 3-pin modules output HIGH when pressed and LOW when idle. The ESP32 pins are configured with internal pull-down resistors. These modules are powered from the ESP32's 3.3V rail.
 - **Startup Defaults**: On boot, the Water Pump starts **OFF** (safe default) and the Grow Light starts **ON**. Pin registers are pre-written before enabling outputs to prevent active-LOW startup glitching, and buttons have a 1-second boot settling lockout.
+- **🚨 Fault Detection Safeties**: The firmware continuously monitors for hardware faults. If the soil sensor jumps erratically, the DHT11 disconnects, or the pump runs for more than 15 seconds consecutively, the system will raise an alert and automatically shut down the pump to prevent flooding.
 
 ## ⚠️ Mains Voltage Safety Notice
 
